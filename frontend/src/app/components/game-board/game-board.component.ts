@@ -16,6 +16,7 @@ import {
   Move,
   MoveResult
 } from '../../models/game.model';
+import { isLakePosition, LAKE_POSITIONS } from '../../models/game-constants';
 import { PieceSelectorComponent } from '../piece-selector/piece-selector.component';
 
 @Component({
@@ -469,12 +470,6 @@ export class GameBoardComponent implements OnInit, OnDestroy {
 
   private subscriptions: Subscription[] = [];
 
-  // Lake positions
-  private lakePositions = [
-    [4, 2], [4, 3], [5, 2], [5, 3],
-    [4, 6], [4, 7], [5, 6], [5, 7]
-  ];
-
   constructor(
     private route: ActivatedRoute,
     private router: Router,
@@ -542,7 +537,7 @@ export class GameBoardComponent implements OnInit, OnDestroy {
   }
 
   isLake(row: number, col: number): boolean {
-    return this.lakePositions.some(pos => pos[0] === row && pos[1] === col);
+    return isLakePosition(row, col);
   }
 
   isSetupZone(row: number, col: number): boolean {
@@ -623,8 +618,8 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     // Create empty board
     this.board = Array(10).fill(null).map(() => Array(10).fill(null));
 
-    // Mark lakes
-    this.lakePositions.forEach(([row, col]) => {
+    // Mark lakes using shared constant
+    LAKE_POSITIONS.forEach(([row, col]) => {
       this.board[row][col] = { type: 'lake' };
     });
 

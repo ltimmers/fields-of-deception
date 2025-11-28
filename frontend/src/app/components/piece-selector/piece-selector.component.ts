@@ -1,6 +1,7 @@
 import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { PieceRank, PieceNames } from '../../models/game.model';
+import { PIECE_DISPLAY_ORDER } from '../../models/game-constants';
 
 @Component({
   selector: 'app-piece-selector',
@@ -93,33 +94,11 @@ export class PieceSelectorComponent {
   @Output() pieceSelected = new EventEmitter<PieceRank>();
 
   getPieces(): { rank: PieceRank; name: string; count: number }[] {
-    const pieces: { rank: PieceRank; name: string; count: number }[] = [];
-
-    // Order: Marshal, General, Colonel, Major, Captain, Lieutenant, Sergeant, Miner, Scout, Spy, Bomb, Flag
-    const order = [
-      PieceRank.MARSHAL,
-      PieceRank.GENERAL,
-      PieceRank.COLONEL,
-      PieceRank.MAJOR,
-      PieceRank.CAPTAIN,
-      PieceRank.LIEUTENANT,
-      PieceRank.SERGEANT,
-      PieceRank.MINER,
-      PieceRank.SCOUT,
-      PieceRank.SPY,
-      PieceRank.BOMB,
-      PieceRank.FLAG,
-    ];
-
-    order.forEach(rank => {
-      pieces.push({
-        rank,
-        name: PieceNames[rank],
-        count: this.availablePieces.get(rank) || 0
-      });
-    });
-
-    return pieces;
+    return PIECE_DISPLAY_ORDER.map(rank => ({
+      rank,
+      name: PieceNames[rank],
+      count: this.availablePieces.get(rank) || 0
+    }));
   }
 
   selectPiece(rank: PieceRank): void {

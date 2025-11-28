@@ -74,7 +74,7 @@ enum PieceRank: int
     {
         // Bomb destroys everything except miner
         if ($defender === self::BOMB) {
-            return $this === self::MINER ? true : false;
+            return $this === self::MINER;
         }
 
         // Spy beats Marshal only when attacking
