@@ -101,6 +101,54 @@ cd backend
 php artisan reverb:start
 ```
 
+## Testing
+
+The backend includes comprehensive unit and feature tests for the API, game logic, and models.
+
+### Running Tests with Docker
+
+Run all tests:
+```bash
+docker-compose exec app php artisan test
+```
+
+Run specific test suites:
+```bash
+# Run only feature tests
+docker-compose exec app php artisan test --testsuite=Feature
+
+# Run only unit tests
+docker-compose exec app php artisan test --testsuite=Unit
+```
+
+Run with coverage (requires Xdebug):
+```bash
+docker-compose exec app php artisan test --coverage
+```
+
+### Running Tests Locally
+
+```bash
+cd backend
+php artisan test
+```
+
+Run specific test files:
+```bash
+# Run a specific test file
+php artisan test tests/Feature/AuthControllerTest.php
+
+# Run a specific test method
+php artisan test --filter test_user_can_register_with_valid_data
+```
+
+### Test Coverage
+
+The test suite includes:
+- **Feature Tests**: Authentication, game management, API endpoints
+- **Unit Tests**: Game service logic, models, AI service, piece combat rules
+- **Total**: 10 test files with 2,098 lines covering authentication, game mechanics, validation, and edge cases
+
 ## Game Rules
 
 Fields of Deception follows classic Stratego rules:
