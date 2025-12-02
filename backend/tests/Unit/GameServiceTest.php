@@ -128,8 +128,9 @@ class GameServiceTest extends TestCase
         $pieces = $this->generateValidSetup(PlayerColor::RED);
         // Try to place a piece on a lake (but lakes are at rows 4-5, so this wouldn't naturally happen)
         // Instead, let's modify the setup to have wrong piece counts
-        $pieces[0]['rank'] = 10; // Create duplicate marshal
-
+        $pieces[0]['row'] = 4;
+        $pieces[0]['col'] = 3
+        ;
         $result = $this->gameService->validateSetup($pieces, PlayerColor::RED);
 
         $this->assertFalse($result);
@@ -138,8 +139,8 @@ class GameServiceTest extends TestCase
     public function test_validate_setup_rejects_incorrect_piece_distribution(): void
     {
         $pieces = $this->generateValidSetup(PlayerColor::RED);
-        // Change a piece rank to create invalid distribution
-        $pieces[0]['rank'] = 10; // Create a second marshal
+        // Change a piece rank to create an invalid distribution
+        $pieces[1]['rank'] = 10; // Create a second marshal
 
         $result = $this->gameService->validateSetup($pieces, PlayerColor::RED);
 
@@ -373,10 +374,10 @@ class GameServiceTest extends TestCase
         $board = $this->gameService->createEmptyBoard();
         // Surround a movable piece with other pieces
         $board[5][5] = ['color' => 'red', 'rank' => 2]; // Scout
-        $board[4][5] = ['color' => 'red', 'rank' => 3]; // Block north
-        $board[6][5] = ['color' => 'red', 'rank' => 3]; // Block south
-        $board[5][4] = ['color' => 'red', 'rank' => 3]; // Block west
-        $board[5][6] = ['color' => 'red', 'rank' => 3]; // Block east
+        $board[4][5] = ['color' => 'red', 'rank' => 11]; // Block north with a bomb
+        $board[6][5] = ['color' => 'red', 'rank' => 11]; // Block south with a bomb
+        $board[5][4] = ['color' => 'red', 'rank' => 11]; // Block west with a bomb
+        $board[5][6] = ['color' => 'red', 'rank' => 11]; // Block east with a bomb
 
         $result = $this->gameService->hasMovablePieces($board, PlayerColor::RED);
 

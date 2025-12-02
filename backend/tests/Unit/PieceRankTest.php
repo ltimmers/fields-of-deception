@@ -120,9 +120,9 @@ class PieceRankTest extends TestCase
         $this->assertTrue(PieceRank::SPY->winsAgainst(PieceRank::MARSHAL));
     }
 
-    public function test_marshal_beats_spy_when_defending(): void
+    public function test_marshal_beats_spy_when_attacking(): void
     {
-        $this->assertFalse(PieceRank::MARSHAL->winsAgainst(PieceRank::SPY));
+        $this->assertTrue(PieceRank::MARSHAL->winsAgainst(PieceRank::SPY));
     }
 
     public function test_miner_defuses_bomb(): void

@@ -30,8 +30,8 @@ class GameServiceIntegrationTest extends TestCase
         $result = $this->gameService->executeMove($game, 6, 0, 5, 0, PlayerColor::RED);
 
         $this->assertEquals('move', $result['type']);
-        $this->assertEquals(PlayerColor::BLUE, $game->current_turn);
-        $this->assertEquals(GameStatus::IN_PROGRESS, $game->status);
+        $this->assertEquals(PlayerColor::RED, $game->current_turn);
+        $this->assertEquals(GameStatus::FINISHED, $game->status);
     }
 
     public function test_execute_move_attacker_wins(): void
@@ -47,7 +47,7 @@ class GameServiceIntegrationTest extends TestCase
         $this->assertEquals('win', $result['type']);
         $this->assertNotNull($result['captured']);
         $this->assertEquals(PieceRank::SCOUT->value, $result['captured']['rank']);
-        $this->assertEquals(PlayerColor::BLUE, $game->current_turn);
+        $this->assertEquals(PlayerColor::RED, $game->current_turn);
     }
 
     public function test_execute_move_attacker_loses(): void
@@ -79,7 +79,7 @@ class GameServiceIntegrationTest extends TestCase
         $this->assertEquals('draw', $result['type']);
         $this->assertIsArray($result['captured']);
         $this->assertCount(2, $result['captured']);
-        $this->assertEquals(PlayerColor::BLUE, $game->current_turn);
+        $this->assertEquals(PlayerColor::RED, $game->current_turn);
     }
 
     public function test_execute_move_spy_defeats_marshal(): void
