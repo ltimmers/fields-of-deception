@@ -9,10 +9,19 @@ use App\Models\Game;
 class AIService
 {
     private GameService $gameService;
+    private ?LLMService $llmService = null;
 
     public function __construct(GameService $gameService)
     {
         $this->gameService = $gameService;
+    }
+
+    /**
+     * Set the LLM service for LLM-based moves
+     */
+    public function setLLMService(LLMService $llmService): void
+    {
+        $this->llmService = $llmService;
     }
 
     /**
@@ -147,8 +156,13 @@ class AIService
     /**
      * Make AI move
      */
-    public function makeMove(Game $game): ?array
+    public function makeMove(Game $game, bool $useLLM = false): ?array
     {
+        // Use LLM if requested and available
+        if ($useLLM && $this->llmService !== null) {
+            return $this->llmService->generateMove($game);
+        }
+
         $board = $game->board_state;
         $aiColor = PlayerColor::BLUE; // AI is always blue
 

@@ -22,6 +22,7 @@ class Game extends Model
         'board_state',
         'is_vs_ai',
         'ai_difficulty',
+        'use_llm',
         'red_setup_complete',
         'blue_setup_complete',
     ];
@@ -34,6 +35,7 @@ class Game extends Model
             'winner' => PlayerColor::class,
             'board_state' => 'array',
             'is_vs_ai' => 'boolean',
+            'use_llm' => 'boolean',
             'red_setup_complete' => 'boolean',
             'blue_setup_complete' => 'boolean',
         ];

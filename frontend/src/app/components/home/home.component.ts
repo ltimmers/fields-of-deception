@@ -35,6 +35,10 @@ import { User } from '../../models/user.model';
                 <option value="medium">Medium</option>
                 <option value="hard">Hard</option>
               </select>
+              <label class="llm-toggle" (click)="$event.stopPropagation()">
+                <input type="checkbox" [(ngModel)]="useLlm">
+                <span>Use LLM</span>
+              </label>
             </div>
             <div class="option-card" (click)="createGame(false)">
               <div class="icon">👥</div>
@@ -55,7 +59,7 @@ import { User } from '../../models/user.model';
                   <div class="game-card" (click)="goToGame(game.id)">
                     <div class="game-status" [class]="game.status">{{ formatStatus(game.status) }}</div>
                     <div class="game-info">
-                      <span>{{ game.is_vs_ai ? 'vs AI (' + game.ai_difficulty + ')' : 'vs Human' }}</span>
+                      <span>{{ game.is_vs_ai ? 'vs AI (' + game.ai_difficulty + (game.use_llm ? ' + LLM' : '') + ')' : 'vs Human' }}</span>
                       <span class="turn" *ngIf="game.status === 'in_progress'">
                         {{ game.current_turn === 'red' ? 'Red' : 'Blue' }}'s turn
                       </span>
@@ -186,6 +190,24 @@ import { User } from '../../models/user.model';
       cursor: pointer;
     }
 
+    .llm-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 12px;
+      color: #ccc;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .llm-toggle input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: #e94560;
+      cursor: pointer;
+    }
+
     .game-lists {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -299,6 +321,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   myGames: Game[] = [];
   openGames: Game[] = [];
   aiDifficulty: AIDifficulty = 'medium';
+  useLlm: boolean = false;
   private subscriptions: Subscription[] = [];
 
   constructor(
@@ -346,7 +369,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   }
 
   createGame(vsAi: boolean): void {
-    this.gameService.createGame(vsAi, this.aiDifficulty).subscribe(game => {
+    this.gameService.createGame(vsAi, this.aiDifficulty, vsAi && this.useLlm).subscribe(game => {
       this.router.navigate(['/game', game.id]);
     });
   }

@@ -12,6 +12,7 @@ use App\Events\SetupComplete;
 use App\Models\Game;
 use App\Services\AIService;
 use App\Services\GameService;
+use App\Services\LLMService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -20,8 +21,12 @@ class GameController extends Controller
 {
     public function __construct(
         private readonly GameService $gameService,
-        private readonly AIService $aiService
-    ) {}
+        private readonly AIService $aiService,
+        private readonly LLMService $llmService
+    ) {
+        // Inject LLM service into AI service
+        $this->aiService->setLLMService($this->llmService);
+    }
 
     /**
      * List all games for the current user
@@ -61,6 +66,7 @@ class GameController extends Controller
         $validated = $request->validate([
             'vs_ai' => 'boolean',
             'ai_difficulty' => 'string|in:easy,medium,hard',
+            'use_llm' => 'boolean',
         ]);
 
         $game = new Game();
@@ -70,6 +76,7 @@ class GameController extends Controller
         $game->board_state = $this->gameService->createEmptyBoard();
         $game->is_vs_ai = $validated['vs_ai'] ?? false;
         $game->ai_difficulty = $validated['ai_difficulty'] ?? 'medium';
+        $game->use_llm = $validated['use_llm'] ?? false;
 
         if ($game->is_vs_ai) {
             $game->status = GameStatus::SETUP;
@@ -267,7 +274,7 @@ class GameController extends Controller
 
         // If AI game and game is still in progress, make AI move
         if ($game->is_vs_ai && $game->status === GameStatus::IN_PROGRESS && $game->current_turn === PlayerColor::BLUE) {
-            $aiMove = $this->aiService->makeMove($game);
+            $aiMove = $this->aiService->makeMove($game, $game->use_llm);
 
             if ($aiMove) {
                 $aiResult = $this->gameService->executeMove(
