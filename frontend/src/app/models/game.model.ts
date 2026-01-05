@@ -95,6 +95,7 @@ export interface MoveResponse {
   result: MoveResult;
   ai_move?: Move;
   ai_result?: MoveResult;
+  board_after_player_move?: (Piece | null)[][];
 }
 
 export interface Move {

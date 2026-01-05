@@ -266,9 +266,12 @@ class GameController extends Controller
             broadcast(new GameUpdated($game));
         }
 
+        // Store intermediate board after player's move (before AI move)
+        $boardAfterPlayerMove = $this->gameService->getBoardForPlayer($game->board_state, $playerColor);
+
         $response = [
             'game' => $game,
-            'board' => $this->gameService->getBoardForPlayer($game->board_state, $playerColor),
+            'board' => $boardAfterPlayerMove,
             'result' => $result,
         ];
 
@@ -288,6 +291,8 @@ class GameController extends Controller
 
                 $response['ai_move'] = $aiMove;
                 $response['ai_result'] = $aiResult;
+                // Include both intermediate board (after player move) and final board (after AI move)
+                $response['board_after_player_move'] = $boardAfterPlayerMove;
                 $response['board'] = $this->gameService->getBoardForPlayer($game->board_state, $playerColor);
                 $response['game'] = $game->fresh();
             }
