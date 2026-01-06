@@ -1128,7 +1128,7 @@ export class GameBoardComponent implements OnInit, OnDestroy {
         this.animatingMove = {
           from: response.ai_move!.from,
           to: response.ai_move!.to,
-          color: 'blue'
+          color: this.playerColor === 'red' ? 'blue' : 'red'
         };
         this.lastMove = { from: response.ai_move!.from, to: response.ai_move!.to };
 
