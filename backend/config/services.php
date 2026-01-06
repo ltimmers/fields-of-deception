@@ -14,6 +14,6 @@ return [
     'llm' => [
         'base_url' => env('LLM_BASE_URL', 'http://localhost:1234/v1'),
         'model' => env('LLM_MODEL', 'local-model'),
-        'enabled' => env('LLM_ENABLED', true),
+        'enabled' => env('LLM_ENABLED', false),
     ],
 ];
