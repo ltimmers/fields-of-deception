@@ -38,7 +38,7 @@ class LLMService
         $prompt = $this->buildMovePrompt($game, $validMoves);
 
         try {
-            $response = Http::timeout(15)->post("{$this->baseUrl}/chat/completions", [
+            $response = Http::timeout(30)->post("{$this->baseUrl}/chat/completions", [
                 'model' => config('services.llm.model', 'local-model'),
                 'messages' => [
                     [
