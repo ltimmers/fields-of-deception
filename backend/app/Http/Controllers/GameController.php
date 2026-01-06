@@ -260,45 +260,88 @@ class GameController extends Controller
             $playerColor
         );
 
+        // Refresh game to get updated state after executeMove saved it
+        $game->refresh();
+
         broadcast(new MoveMade($game, $result, $playerColor))->toOthers();
 
         if ($game->status === GameStatus::FINISHED) {
             broadcast(new GameUpdated($game));
         }
 
-        // Store intermediate board after player's move (before AI move)
+        // Return the board after player's move - AI move will be handled separately
         $boardAfterPlayerMove = $this->gameService->getBoardForPlayer($game->board_state, $playerColor);
+
+        $aiPending = $game->is_vs_ai && $game->status === GameStatus::IN_PROGRESS && $game->current_turn === PlayerColor::BLUE;
+        
+        \Log::info('Move response', [
+            'is_vs_ai' => $game->is_vs_ai,
+            'status' => $game->status->value,
+            'current_turn' => $game->current_turn->value,
+            'ai_pending' => $aiPending,
+        ]);
 
         $response = [
             'game' => $game,
             'board' => $boardAfterPlayerMove,
             'result' => $result,
+            'ai_pending' => $aiPending,
         ];
 
-        // If AI game and game is still in progress, make AI move
-        if ($game->is_vs_ai && $game->status === GameStatus::IN_PROGRESS && $game->current_turn === PlayerColor::BLUE) {
-            $aiMove = $this->aiService->makeMove($game, $game->use_llm);
+        return response()->json($response);
+    }
 
-            if ($aiMove) {
-                $aiResult = $this->gameService->executeMove(
-                    $game,
-                    $aiMove['from']['row'],
-                    $aiMove['from']['col'],
-                    $aiMove['to']['row'],
-                    $aiMove['to']['col'],
-                    PlayerColor::BLUE
-                );
+    /**
+     * Request AI move (separate endpoint to allow frontend to show "thinking" state)
+     */
+    public function aiMove(Game $game): JsonResponse
+    {
+        $userId = Auth::id();
 
-                $response['ai_move'] = $aiMove;
-                $response['ai_result'] = $aiResult;
-                // Include both intermediate board (after player move) and final board (after AI move)
-                $response['board_after_player_move'] = $boardAfterPlayerMove;
-                $response['board'] = $this->gameService->getBoardForPlayer($game->board_state, $playerColor);
-                $response['game'] = $game->fresh();
-            }
+        // Verify this is an AI game and it's the AI's turn
+        if (!$game->is_vs_ai) {
+            return response()->json(['error' => 'Not an AI game'], 400);
         }
 
-        return response()->json($response);
+        if ($game->player_red_id !== $userId) {
+            return response()->json(['error' => 'Not a participant in this game'], 403);
+        }
+
+        if ($game->status !== GameStatus::IN_PROGRESS) {
+            return response()->json(['error' => 'Game is not in progress'], 400);
+        }
+
+        if ($game->current_turn !== PlayerColor::BLUE) {
+            return response()->json(['error' => 'Not AI turn'], 400);
+        }
+
+        $aiMove = $this->aiService->makeMove($game, $game->use_llm);
+
+        if (!$aiMove) {
+            return response()->json(['error' => 'AI could not make a move'], 500);
+        }
+
+        $aiResult = $this->gameService->executeMove(
+            $game,
+            $aiMove['from']['row'],
+            $aiMove['from']['col'],
+            $aiMove['to']['row'],
+            $aiMove['to']['col'],
+            PlayerColor::BLUE
+        );
+
+        broadcast(new MoveMade($game, $aiResult, PlayerColor::BLUE))->toOthers();
+
+        if ($game->status === GameStatus::FINISHED) {
+            broadcast(new GameUpdated($game));
+        }
+
+        return response()->json([
+            'game' => $game->fresh(),
+            'board' => $this->gameService->getBoardForPlayer($game->board_state, PlayerColor::RED),
+            'ai_move' => $aiMove,
+            'ai_result' => $aiResult,
+        ]);
     }
 
     /**

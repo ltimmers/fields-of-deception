@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
@@ -146,6 +146,13 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
               ⚔️ Battle! ⚔️
             </div>
           }
+
+          @if (isThinking) {
+            <div class="thinking-popup">
+              <span>AI is thinking</span><span class="thinking-dots"></span>
+            </div>
+          }
+
         </div>
       </div>
 
@@ -162,7 +169,7 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
   `,
   styles: [`
     .game-container {
-      max-width: 900px;
+      max-width: 1000px;
       margin: 0 auto;
       padding: 20px;
     }
@@ -343,6 +350,7 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
 
     .entry-message {
       color: #ccc;
+      white-space: pre-line;
     }
 
     .console-entry.win .entry-message {
@@ -358,6 +366,7 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
     }
 
     .board-container {
+      position: relative;
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -581,6 +590,44 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
       animation: indicator-pulse 1s ease-in-out infinite;
     }
 
+    .thinking-popup {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      padding: 12px 20px;
+      border-radius: 8px;
+      background: #1a1a2e;
+      color: #4d96ff;
+      border: 2px solid #4d96ff;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      font-weight: bold;
+      font-size: 14px;
+      z-index: 1000;
+      white-space: nowrap;
+    }
+
+    .thinking-dots {
+      display: inline-block;
+      width: 24px;
+      text-align: left;
+    }
+
+    .thinking-dots::after {
+      content: '';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+
+    @keyframes dots {
+      0% { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
+      100% { content: ''; }
+    }
+
     .rank {
       font-size: 10px;
       text-transform: uppercase;
@@ -690,6 +737,7 @@ export class GameBoardComponent implements OnInit, OnDestroy {
   // Animation state
   animatingMove: { from: { row: number; col: number }; to: { row: number; col: number }; color: PlayerColor } | null = null;
   isProcessingMove = false;
+  isThinking = false;
 
   // Battle preview state
   battlePreview: {
@@ -710,7 +758,8 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     private router: Router,
     private gameService: GameService,
     private wsService: WebSocketService,
-    private authService: AuthService
+    private authService: AuthService,
+    private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
@@ -972,6 +1021,8 @@ export class GameBoardComponent implements OnInit, OnDestroy {
 
     this.gameService.makeMove(this.gameId, fromRow, fromCol, toRow, toCol).subscribe({
       next: (response) => {
+        console.log('Move response:', response);
+        console.log('AI pending:', response.ai_pending);
         this.selectedPiece = null;
         this.validMoves = [];
 
@@ -986,20 +1037,34 @@ export class GameBoardComponent implements OnInit, OnDestroy {
           };
           this.lastMove = { from: { row: fromRow, col: fromCol }, to: { row: toRow, col: toCol } };
 
-          // Update to intermediate board (after player move, before AI move)
-          if (response.board_after_player_move) {
-            this.board = response.board_after_player_move;
-          } else {
-            this.board = response.board;
-          }
+          // Update board after player move
+          this.board = response.board;
+          this.game = response.game;
 
           // Log player's move result
-          this.addMoveToLog(this.playerColor, response.result);
+          this.addMoveToLog(this.playerColor, response.result, { row: fromRow, col: fromCol }, { row: toRow, col: toCol });
 
-          // After delay, clear player animation and show AI move if applicable
+          // After delay, clear player animation and check if AI move is needed
           setTimeout(() => {
             this.animatingMove = null;
-            this.processAiMove(response);
+            
+            // If AI move is pending, show thinking and make separate API call
+            if (response.ai_pending) {
+              console.log('Setting isThinking to true');
+              this.isThinking = true;
+              this.cdr.detectChanges();
+              console.log('isThinking is now:', this.isThinking);
+              // Small delay to ensure thinking indicator renders before API call
+              setTimeout(() => {
+                console.log('Calling requestAiMove');
+                this.requestAiMove();
+              }, 100);
+            } else {
+              // No AI move needed, update final state
+              this.isMyTurn = this.game!.current_turn === this.playerColor;
+              this.lastMove = null;
+              this.isProcessingMove = false;
+            }
           }, 800);
         };
 
@@ -1037,6 +1102,30 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     });
   }
 
+  private requestAiMove(): void {
+    const startTime = Date.now();
+    const minThinkingTime = 1000; // Show thinking for at least 1 second
+
+    this.gameService.requestAiMove(this.gameId).subscribe({
+      next: (response) => {
+        const elapsed = Date.now() - startTime;
+        const remainingDelay = Math.max(0, minThinkingTime - elapsed);
+        
+        // Ensure thinking shows for at least minThinkingTime
+        setTimeout(() => {
+          this.isThinking = false;
+          this.processAiMove(response);
+        }, remainingDelay);
+      },
+      error: (err) => {
+        this.isThinking = false;
+        this.isProcessingMove = false;
+        this.showMessage('AI move failed', true);
+        this.loadGame(); // Reload game state
+      }
+    });
+  }
+
   private processAiMove(response: MoveResponse): void {
     if (response.ai_move && response.ai_result) {
       const isAiBattle = response.ai_result.type !== 'move';
@@ -1055,7 +1144,7 @@ export class GameBoardComponent implements OnInit, OnDestroy {
         this.isMyTurn = this.game!.current_turn === this.playerColor;
 
         // Log AI's move result
-        this.addMoveToLog('blue', response.ai_result!);
+        this.addMoveToLog('blue', response.ai_result!, response.ai_move!.from, response.ai_move!.to);
 
         // Clear AI animation after delay
         setTimeout(() => {
@@ -1069,36 +1158,32 @@ export class GameBoardComponent implements OnInit, OnDestroy {
       if (isAiBattle && response.ai_result.attacker && response.ai_result.defender) {
         const aiAttacker = response.ai_result.attacker;
         const aiDefender = response.ai_result.defender;
-        setTimeout(() => {
-          this.battlePreview = {
-            attacker: {
-              row: response.ai_move!.from.row,
-              col: response.ai_move!.from.col,
-              rank: aiAttacker.rank!,
-              color: 'blue'
-            },
-            defender: {
-              row: response.ai_move!.to.row,
-              col: response.ai_move!.to.col,
-              rank: aiDefender.rank!,
-              color: 'red'
-            }
-          };
+        this.battlePreview = {
+          attacker: {
+            row: response.ai_move!.from.row,
+            col: response.ai_move!.from.col,
+            rank: aiAttacker.rank!,
+            color: 'blue'
+          },
+          defender: {
+            row: response.ai_move!.to.row,
+            col: response.ai_move!.to.col,
+            rank: aiDefender.rank!,
+            color: 'red'
+          }
+        };
 
-          // Wait 2 seconds, then clear preview and process AI move
-          setTimeout(() => {
-            this.battlePreview = null;
-            processAiMoveAnimation();
-          }, 2000);
-        }, 300);
-      } else {
-        // No AI battle, just process the move after short delay
+        // Wait 2 seconds, then clear preview and process AI move
         setTimeout(() => {
+          this.battlePreview = null;
           processAiMoveAnimation();
-        }, 300);
+        }, 2000);
+      } else {
+        // No AI battle, just process the move
+        processAiMoveAnimation();
       }
     } else {
-      // No AI move, just update final state
+      // No AI move data, just update final state
       this.board = response.board;
       this.game = response.game;
       this.isMyTurn = this.game!.current_turn === this.playerColor;
@@ -1107,11 +1192,14 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     }
   }
 
-  private addMoveToLog(color: PlayerColor, result: MoveResult): void {
+  private addMoveToLog(color: PlayerColor, result: MoveResult, from: {row: number, col: number}, to: {row: number, col: number}): void {
     // Only reveal enemy piece ranks when there's actual combat (win/lose/draw)
     // For simple moves, never show the enemy's moving piece rank
     const isPlayerMove = color === this.playerColor;
     const isBattle = result.type === 'win' || result.type === 'lose' || result.type === 'draw';
+    
+    // Format coordinates as (row,col)
+    const moveCoords = `(${from.row},${from.col})→(${to.row},${to.col})`;
     
     let attackerName: string;
     let defenderName: string;
@@ -1135,16 +1223,16 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     let message: string;
     switch (result.type) {
       case 'win':
-        message = `${attackerName} defeats ${defenderName}!`;
+        message = `${attackerName} defeats ${defenderName}!\n${moveCoords}`;
         break;
       case 'lose':
-        message = `${attackerName} defeated by ${defenderName}`;
+        message = `${attackerName} defeated by ${defenderName}\n${moveCoords}`;
         break;
       case 'draw':
-        message = `${attackerName} vs ${defenderName} - both eliminated!`;
+        message = `${attackerName} vs ${defenderName} - both eliminated!\n${moveCoords}`;
         break;
       default:
-        message = `${attackerName} moves`;
+        message = `${attackerName} moves\n${moveCoords}`;
     }
 
     this.moveLog.unshift({

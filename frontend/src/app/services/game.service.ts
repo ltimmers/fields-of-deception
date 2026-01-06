@@ -49,6 +49,10 @@ export class GameService {
     });
   }
 
+  requestAiMove(gameId: number): Observable<MoveResponse> {
+    return this.http.post<MoveResponse>(`${this.apiUrl}/games/${gameId}/ai-move`, {});
+  }
+
   getValidMoves(gameId: number, row: number, col: number): Observable<{ moves: Move[] }> {
     return this.http.post<{ moves: Move[] }>(`${this.apiUrl}/games/${gameId}/valid-moves`, { row, col });
   }
