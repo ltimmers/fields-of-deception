@@ -99,9 +99,12 @@ class LLMService
                 'response' => $response->json(),
             ]);
         } catch (\Exception $e) {
+            $isTimeout = $e instanceof \Illuminate\Http\Client\RequestException && 
+                         str_contains(strtolower($e->getMessage()), 'timeout');
+            
             Log::error('LLM API error, falling back to random valid move', [
                 'error' => $e->getMessage(),
-                'is_timeout' => $e instanceof \Illuminate\Http\Client\ConnectionException,
+                'is_timeout' => $isTimeout,
             ]);
         }
 
