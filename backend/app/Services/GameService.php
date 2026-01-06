@@ -365,7 +365,7 @@ class GameService
                     $visibleBoard[$row][$col] = null;
                 } elseif (($piece['type'] ?? null) === 'lake') {
                     $visibleBoard[$row][$col] = ['type' => 'lake'];
-                } elseif ($piece['color'] === $playerColor->value || $piece['revealed']) {
+                } elseif ($piece['color'] === $playerColor->value || ($piece['revealed'] ?? false)) {
                     $visibleBoard[$row][$col] = $piece;
                 } else {
                     // Hide opponent's piece rank
