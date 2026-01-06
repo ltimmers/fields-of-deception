@@ -126,7 +126,7 @@ class LLMServiceTest extends TestCase
         $this->assertContains($result, $validMoves);
     }
 
-    public function test_generate_move_throws_exception_on_api_error(): void
+    public function test_generate_move_falls_back_to_random_move_on_api_error(): void
     {
         $game = $this->createGameWithMoves();
         $validMoves = $this->getValidMoves();
@@ -140,13 +140,13 @@ class LLMServiceTest extends TestCase
 
         Log::shouldReceive('error')->once();
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Failed to generate move via LLM API');
+        $result = $this->llmService->generateMove($game);
 
-        $this->llmService->generateMove($game);
+        $this->assertNotNull($result);
+        $this->assertContains($result, $validMoves);
     }
 
-    public function test_generate_move_handles_timeout(): void
+    public function test_generate_move_falls_back_to_random_move_on_timeout(): void
     {
         $game = $this->createGameWithMoves();
         $validMoves = $this->getValidMoves();
@@ -160,10 +160,10 @@ class LLMServiceTest extends TestCase
 
         Log::shouldReceive('error')->once();
 
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Failed to generate move via LLM API');
+        $result = $this->llmService->generateMove($game);
 
-        $this->llmService->generateMove($game);
+        $this->assertNotNull($result);
+        $this->assertContains($result, $validMoves);
     }
 
     public function test_generate_move_handles_malformed_json_with_regex_fallback(): void
