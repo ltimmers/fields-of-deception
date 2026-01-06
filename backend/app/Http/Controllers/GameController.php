@@ -273,13 +273,6 @@ class GameController extends Controller
         $boardAfterPlayerMove = $this->gameService->getBoardForPlayer($game->board_state, $playerColor);
 
         $aiPending = $game->is_vs_ai && $game->status === GameStatus::IN_PROGRESS && $game->current_turn === PlayerColor::BLUE;
-        
-        \Log::info('Move response', [
-            'is_vs_ai' => $game->is_vs_ai,
-            'status' => $game->status->value,
-            'current_turn' => $game->current_turn->value,
-            'ai_pending' => $aiPending,
-        ]);
 
         $response = [
             'game' => $game,

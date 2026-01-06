@@ -4,7 +4,6 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { GameService } from '../../services/game.service';
 import { WebSocketService } from '../../services/websocket.service';
-import { AuthService } from '../../services/auth.service';
 import {
   Game,
   Piece,
@@ -758,7 +757,6 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     private router: Router,
     private gameService: GameService,
     private wsService: WebSocketService,
-    private authService: AuthService,
     private cdr: ChangeDetectorRef
   ) {}
 
@@ -1021,8 +1019,6 @@ export class GameBoardComponent implements OnInit, OnDestroy {
 
     this.gameService.makeMove(this.gameId, fromRow, fromCol, toRow, toCol).subscribe({
       next: (response) => {
-        console.log('Move response:', response);
-        console.log('AI pending:', response.ai_pending);
         this.selectedPiece = null;
         this.validMoves = [];
 
@@ -1050,13 +1046,10 @@ export class GameBoardComponent implements OnInit, OnDestroy {
             
             // If AI move is pending, show thinking and make separate API call
             if (response.ai_pending) {
-              console.log('Setting isThinking to true');
               this.isThinking = true;
               this.cdr.detectChanges();
-              console.log('isThinking is now:', this.isThinking);
               // Small delay to ensure thinking indicator renders before API call
               setTimeout(() => {
-                console.log('Calling requestAiMove');
                 this.requestAiMove();
               }, 100);
             } else {
