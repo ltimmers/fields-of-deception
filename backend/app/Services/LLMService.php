@@ -38,7 +38,7 @@ class LLMService
         $prompt = $this->buildMovePrompt($game, $validMoves);
 
         try {
-            $response = Http::timeout(30)->post("{$this->baseUrl}/chat/completions", [
+            $response = Http::timeout(15)->post("{$this->baseUrl}/chat/completions", [
                 'model' => config('services.llm.model', 'local-model'),
                 'messages' => [
                     [
@@ -99,8 +99,10 @@ class LLMService
                 'response' => $response->json(),
             ]);
         } catch (\Exception $e) {
-            Log::error('LLM API error', ['error' => $e->getMessage()]);
-            throw new \RuntimeException('Failed to generate move via LLM API', 0, $e);
+            Log::error('LLM API error, falling back to random valid move', [
+                'error' => $e->getMessage(),
+                'is_timeout' => $e instanceof \Illuminate\Http\Client\ConnectionException,
+            ]);
         }
 
         // Fallback: return a random valid move
