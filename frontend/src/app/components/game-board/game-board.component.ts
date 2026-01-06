@@ -280,7 +280,8 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
     }
 
     .move-console {
-      width: 560px;
+      width: 100%;
+      max-width: 560px;
       background: #1a1a2e;
       border-radius: 10px;
       padding: 15px;
