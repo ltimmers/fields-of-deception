@@ -101,12 +101,11 @@ class LLMService
                 'response' => $response->json(),
             ]);
         } catch (\Exception $e) {
-            // Log error and throw exception for API/connection errors
-            Log::error('LLM API error', [
+            // Log error and fall back to random move for API/connection errors
+            Log::error('LLM API error, falling back to random move', [
                 'error' => $e->getMessage(),
                 'exception_type' => get_class($e),
             ]);
-            throw new \RuntimeException('Failed to generate move via LLM API: ' . $e->getMessage());
         }
 
         // Fallback: return a random valid move for invalid responses
