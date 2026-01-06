@@ -36,7 +36,7 @@ import { User } from '../../models/user.model';
                 <option value="hard">Hard</option>
               </select>
               <label class="llm-toggle" (click)="$event.stopPropagation()">
-                <input type="checkbox" [(ngModel)]="useLlm">
+                <input type="checkbox" [(ngModel)]="useLLM">
                 <span>Use LLM</span>
               </label>
             </div>
@@ -321,7 +321,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   myGames: Game[] = [];
   openGames: Game[] = [];
   aiDifficulty: AIDifficulty = 'medium';
-  useLlm: boolean = false;
+  useLLM: boolean = false;
   private subscriptions: Subscription[] = [];
 
   constructor(
@@ -369,7 +369,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   }
 
   createGame(vsAi: boolean): void {
-    this.gameService.createGame(vsAi, this.aiDifficulty, this.useLlm).subscribe(game => {
+    this.gameService.createGame(vsAi, this.aiDifficulty, this.useLLM).subscribe(game => {
       this.router.navigate(['/game', game.id]);
     });
   }
