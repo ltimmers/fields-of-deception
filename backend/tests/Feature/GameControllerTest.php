@@ -510,7 +510,10 @@ class GameControllerTest extends TestCase
 
         // Place some AI pieces on the board
         $board = $game->board_state;
-        $board[3][0] = ['color' => 'blue', 'rank' => 2]; // Scout that can move
+        $board[3][0] = ['color' => 'blue', 'rank' => 2, 'revealed' => false]; // Scout that can move
+        // Add red pieces so the game doesn't end immediately
+        $board[6][0] = ['color' => 'red', 'rank' => 2, 'revealed' => false];
+        $board[6][1] = ['color' => 'red', 'rank' => 0, 'revealed' => false]; // Flag
         $game->board_state = $board;
         $game->save();
 

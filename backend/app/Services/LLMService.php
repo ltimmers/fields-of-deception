@@ -91,6 +91,8 @@ class LLMService
                             'max_index' => count($validMoves) - 1,
                             'raw_content' => substr($content, 0, 200),
                         ]);
+                        // Fallback to random valid move
+                        return $validMoves[array_rand($validMoves)];
                     }
                 }
             }
@@ -99,15 +101,14 @@ class LLMService
                 'response' => $response->json(),
             ]);
         } catch (\Exception $e) {
-            // Log error and fall back to random move
-            // Note: Timeout and connection errors are both caught here
-            Log::error('LLM API error, falling back to random valid move', [
+            // Log error and fall back to random move for API/connection errors
+            Log::error('LLM API error, falling back to random move', [
                 'error' => $e->getMessage(),
                 'exception_type' => get_class($e),
             ]);
         }
 
-        // Fallback: return a random valid move
+        // Final fallback: return a random valid move when no valid move was parsed from a successful LLM response
         return $validMoves[array_rand($validMoves)];
     }
 
@@ -154,6 +155,11 @@ PROMPT;
             for ($col = 0; $col < 10; $col++) {
                 if (isset($board[$row][$col]) && $board[$row][$col] !== null && !$this->gameService->isLake($row, $col)) {
                     $piece = $board[$row][$col];
+                    
+                    // Skip lake entries or pieces without color
+                    if (!isset($piece['color'])) {
+                        continue;
+                    }
                     
                     if ($piece['color'] === 'blue') {
                         // Blue pieces: show rank
