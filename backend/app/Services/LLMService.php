@@ -108,7 +108,7 @@ class LLMService
             ]);
         }
 
-        // Fallback: return a random valid move for invalid responses
+        // Final fallback: return a random valid move when no valid move was parsed from a successful LLM response
         return $validMoves[array_rand($validMoves)];
     }
 
