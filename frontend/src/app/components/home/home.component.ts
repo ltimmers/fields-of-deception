@@ -369,7 +369,7 @@ export class HomeComponent implements OnInit, OnDestroy {
   }
 
   createGame(vsAi: boolean): void {
-    this.gameService.createGame(vsAi, this.aiDifficulty, vsAi && this.useLlm).subscribe(game => {
+    this.gameService.createGame(vsAi, this.aiDifficulty, this.useLlm).subscribe(game => {
       this.router.navigate(['/game', game.id]);
     });
   }

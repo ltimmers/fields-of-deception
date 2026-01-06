@@ -125,6 +125,42 @@ class GameControllerTest extends TestCase
             ]);
     }
 
+    public function test_user_can_create_ai_game_with_llm(): void
+    {
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson('/api/games', [
+                'vs_ai' => true,
+                'ai_difficulty' => 'medium',
+                'use_llm' => true,
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJson([
+                'player_red_id' => $this->user->id,
+                'status' => GameStatus::SETUP->value,
+                'is_vs_ai' => true,
+                'ai_difficulty' => 'medium',
+                'use_llm' => true,
+            ]);
+    }
+
+    public function test_cannot_use_llm_without_vs_ai(): void
+    {
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson('/api/games', [
+                'vs_ai' => false,
+                'use_llm' => true,
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'message' => 'The use_llm parameter can only be true when vs_ai is true.',
+                'errors' => [
+                    'use_llm' => ['The use_llm field requires vs_ai to be true.']
+                ]
+            ]);
+    }
+
     public function test_user_can_join_open_game(): void
     {
         $otherUser = User::factory()->create();

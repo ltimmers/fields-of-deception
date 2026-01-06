@@ -69,6 +69,16 @@ class GameController extends Controller
             'use_llm' => 'boolean',
         ]);
 
+        // Validate that use_llm can only be true when vs_ai is true
+        if (($validated['use_llm'] ?? false) && !($validated['vs_ai'] ?? false)) {
+            return response()->json([
+                'message' => 'The use_llm parameter can only be true when vs_ai is true.',
+                'errors' => [
+                    'use_llm' => ['The use_llm field requires vs_ai to be true.']
+                ]
+            ], 422);
+        }
+
         $game = new Game();
         $game->player_red_id = Auth::id();
         $game->status = GameStatus::WAITING;
