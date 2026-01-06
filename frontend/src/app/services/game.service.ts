@@ -20,10 +20,11 @@ export class GameService {
     return this.http.get<Game[]>(`${this.apiUrl}/games/open`);
   }
 
-  createGame(vsAi: boolean = false, aiDifficulty: AIDifficulty = 'medium'): Observable<Game> {
+  createGame(vsAi: boolean = false, aiDifficulty: AIDifficulty = 'medium', useLLM: boolean = false): Observable<Game> {
     return this.http.post<Game>(`${this.apiUrl}/games`, {
       vs_ai: vsAi,
-      ai_difficulty: aiDifficulty
+      ai_difficulty: aiDifficulty,
+      use_llm: useLLM
     });
   }
 
@@ -46,6 +47,10 @@ export class GameService {
       to_row: toRow,
       to_col: toCol
     });
+  }
+
+  requestAiMove(gameId: number): Observable<MoveResponse> {
+    return this.http.post<MoveResponse>(`${this.apiUrl}/games/${gameId}/ai-move`, {});
   }
 
   getValidMoves(gameId: number, row: number, col: number): Observable<{ moves: Move[] }> {

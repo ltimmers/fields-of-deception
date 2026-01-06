@@ -1,10 +1,9 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { GameService } from '../../services/game.service';
 import { WebSocketService } from '../../services/websocket.service';
-import { AuthService } from '../../services/auth.service';
 import {
   Game,
   Piece,
@@ -14,7 +13,8 @@ import {
   PlayerColor,
   SetupPiece,
   Move,
-  MoveResult
+  MoveResult,
+  MoveResponse
 } from '../../models/game.model';
 import { isLakePosition, LAKE_POSITIONS } from '../../models/game-constants';
 import { PieceSelectorComponent } from '../piece-selector/piece-selector.component';
@@ -64,52 +64,96 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
         </div>
       }
 
-      <div class="board-container">
-        <div class="board">
-          @for (row of [0,1,2,3,4,5,6,7,8,9]; track row) {
-            <div class="row">
-              @for (col of [0,1,2,3,4,5,6,7,8,9]; track col) {
-                <div
-                  class="cell"
-                  [class.lake]="isLake(row, col)"
-                  [class.valid-move]="isValidMoveTarget(row, col)"
-                  [class.selected]="isSelected(row, col)"
-                  [class.setup-zone]="isSetupZone(row, col)"
-                  [class.last-move]="isLastMove(row, col)"
-                  (click)="onCellClick(row, col)"
-                >
-                  @if (board && board[row] && board[row][col]) {
-                    @if (board[row][col]?.type !== 'lake') {
+      <div class="game-layout">
+        <div class="move-console">
+          <h3>Battle Log</h3>
+          <div class="console-content" #consoleContent>
+            @if (moveLog.length === 0) {
+              <div class="console-empty">No moves yet...</div>
+            }
+            @for (entry of moveLog; track $index) {
+              <div class="console-entry" [class]="entry.type" [class.red]="entry.color === 'red'" [class.blue]="entry.color === 'blue'">
+                <span class="entry-color">{{ entry.color === 'red' ? '🔴' : '🔵' }}</span>
+                <span class="entry-message">{{ entry.message }}</span>
+              </div>
+            }
+          </div>
+        </div>
+
+        <div class="board-container">
+          <div class="board">
+            @for (row of [0,1,2,3,4,5,6,7,8,9]; track row) {
+              <div class="row">
+                @for (col of [0,1,2,3,4,5,6,7,8,9]; track col) {
+                  <div
+                    class="cell"
+                    [class.lake]="isLake(row, col)"
+                    [class.valid-move]="isValidMoveTarget(row, col)"
+                    [class.selected]="isSelected(row, col)"
+                    [class.setup-zone]="isSetupZone(row, col)"
+                    [class.last-move]="isLastMove(row, col)"
+                    [class.animating-from]="isAnimatingFrom(row, col)"
+                    [class.animating-to]="isAnimatingTo(row, col)"
+                    [class.animating-red]="isAnimatingTo(row, col) && getAnimatingColor() === 'red'"
+                    [class.animating-blue]="isAnimatingTo(row, col) && getAnimatingColor() === 'blue'"
+                    [class.battle-attacker]="isBattleAttacker(row, col)"
+                    [class.battle-defender]="isBattleDefender(row, col)"
+                    (click)="onCellClick(row, col)"
+                  >
+                    @if (getBattlePiece(row, col); as battlePiece) {
                       <div
-                        class="piece"
-                        [class.red]="board[row][col]?.color === 'red'"
-                        [class.blue]="board[row][col]?.color === 'blue'"
-                        [class.hidden]="board[row][col]?.hidden"
-                        [class.revealed]="board[row][col]?.revealed"
+                        class="piece battle-piece-reveal"
+                        [class.red]="battlePiece.color === 'red'"
+                        [class.blue]="battlePiece.color === 'blue'"
                       >
-                        @if (!board[row][col]?.hidden) {
-                          <span class="rank">{{ getPieceName(board[row][col]?.rank) }}</span>
-                          <span class="rank-number">{{ board[row][col]?.rank }}</span>
-                        } @else {
-                          <span class="hidden-piece">?</span>
-                        }
+                        <span class="rank">{{ getPieceName(battlePiece.rank) }}</span>
+                        <span class="rank-number">{{ battlePiece.rank }}</span>
                       </div>
+                    } @else if (board && board[row] && board[row][col]) {
+                      @if (board[row][col]?.type !== 'lake') {
+                        <div
+                          class="piece"
+                          [class.red]="board[row][col]?.color === 'red'"
+                          [class.blue]="board[row][col]?.color === 'blue'"
+                          [class.hidden]="board[row][col]?.hidden"
+                          [class.revealed]="board[row][col]?.revealed"
+                          [class.piece-animating]="isAnimatingTo(row, col)"
+                        >
+                          @if (!board[row][col]?.hidden) {
+                            <span class="rank">{{ getPieceName(board[row][col]?.rank) }}</span>
+                            <span class="rank-number">{{ board[row][col]?.rank }}</span>
+                          } @else {
+                            <span class="hidden-piece">?</span>
+                          }
+                        </div>
+                      }
                     }
-                  }
-                </div>
-              }
+                  </div>
+                }
+              </div>
+            }
+          </div>
+
+          @if (animatingMove) {
+            <div class="move-indicator" [class]="animatingMove.color">
+              {{ animatingMove.color === 'red' ? 'Red' : 'Blue' }} is moving...
             </div>
           }
+
+          @if (battlePreview) {
+            <div class="battle-indicator">
+              ⚔️ Battle! ⚔️
+            </div>
+          }
+
+          @if (isThinking) {
+            <div class="thinking-popup">
+              <span>AI is thinking</span><span class="thinking-dots"></span>
+            </div>
+          }
+
         </div>
       </div>
-
-      @if (lastMoveResult) {
-        <div class="move-result" [class]="lastMoveResult.type">
-          <h3>{{ getMoveResultTitle(lastMoveResult) }}</h3>
-          <p>{{ getMoveResultDescription(lastMoveResult) }}</p>
-          <button (click)="lastMoveResult = null">Dismiss</button>
-        </div>
-      }
 
       @if (game?.status === 'in_progress') {
         <div class="game-controls">
@@ -124,7 +168,7 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
   `,
   styles: [`
     .game-container {
-      max-width: 900px;
+      max-width: 1000px;
       margin: 0 auto;
       padding: 20px;
     }
@@ -228,10 +272,104 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
       cursor: not-allowed;
     }
 
-    .board-container {
+    .game-layout {
       display: flex;
       justify-content: center;
+      gap: 20px;
       margin: 20px 0;
+    }
+
+    .move-console {
+      width: 100%;
+      max-width: 560px;
+      background: #1a1a2e;
+      border-radius: 10px;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+      max-height: 720px;
+    }
+
+    .move-console h3 {
+      color: #fff;
+      margin: 0 0 15px 0;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #333;
+      font-size: 16px;
+    }
+
+    .console-content {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .console-empty {
+      color: #666;
+      font-style: italic;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .console-entry {
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: #252540;
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+
+    .console-entry.win {
+      background: rgba(107, 203, 119, 0.15);
+      border-left: 3px solid #6bcb77;
+    }
+
+    .console-entry.lose {
+      background: rgba(233, 69, 96, 0.15);
+      border-left: 3px solid #e94560;
+    }
+
+    .console-entry.draw {
+      background: rgba(255, 217, 61, 0.15);
+      border-left: 3px solid #ffd93d;
+    }
+
+    .console-entry.move {
+      background: rgba(77, 150, 255, 0.1);
+      border-left: 3px solid #4d96ff;
+    }
+
+    .entry-color {
+      flex-shrink: 0;
+    }
+
+    .entry-message {
+      color: #ccc;
+      white-space: pre-line;
+    }
+
+    .console-entry.win .entry-message {
+      color: #6bcb77;
+    }
+
+    .console-entry.lose .entry-message {
+      color: #e94560;
+    }
+
+    .console-entry.draw .entry-message {
+      color: #ffd93d;
+    }
+
+    .board-container {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
 
     .board {
@@ -295,6 +433,35 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
       box-shadow: inset 0 0 0 3px #ffd93d;
     }
 
+    .cell.animating-from {
+      background: rgba(255, 217, 61, 0.3);
+      animation: pulse-from 0.8s ease-in-out;
+    }
+
+    .cell.animating-to {
+      animation: pulse-to 0.8s ease-in-out;
+    }
+
+    .cell.animating-red {
+      box-shadow: inset 0 0 0 4px #e94560, 0 0 20px rgba(233, 69, 96, 0.6);
+    }
+
+    .cell.animating-blue {
+      box-shadow: inset 0 0 0 4px #4d96ff, 0 0 20px rgba(77, 150, 255, 0.6);
+    }
+
+    @keyframes pulse-from {
+      0% { background: rgba(255, 217, 61, 0.5); }
+      50% { background: rgba(255, 217, 61, 0.2); }
+      100% { background: rgba(255, 217, 61, 0.3); }
+    }
+
+    @keyframes pulse-to {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
+    }
+
     .piece {
       width: 60px;
       height: 60px;
@@ -329,6 +496,138 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
       transform: scale(1.05);
     }
 
+    .piece.piece-animating {
+      animation: piece-appear 0.5s ease-out;
+    }
+
+    @keyframes piece-appear {
+      0% {
+        transform: scale(0.5);
+        opacity: 0.5;
+      }
+      50% {
+        transform: scale(1.1);
+        opacity: 1;
+      }
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+    }
+
+    .move-indicator {
+      text-align: center;
+      padding: 10px 20px;
+      margin-top: 15px;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 16px;
+      animation: indicator-pulse 1s ease-in-out infinite;
+    }
+
+    .move-indicator.red {
+      background: rgba(233, 69, 96, 0.2);
+      color: #e94560;
+      border: 2px solid #e94560;
+    }
+
+    .move-indicator.blue {
+      background: rgba(77, 150, 255, 0.2);
+      color: #4d96ff;
+      border: 2px solid #4d96ff;
+    }
+
+    @keyframes indicator-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .cell.battle-attacker {
+      box-shadow: inset 0 0 0 4px #ffd93d, 0 0 25px rgba(255, 217, 61, 0.8);
+      animation: battle-glow 1s ease-in-out infinite;
+    }
+
+    .cell.battle-defender {
+      box-shadow: inset 0 0 0 4px #e94560, 0 0 25px rgba(233, 69, 96, 0.8);
+      animation: battle-glow 1s ease-in-out infinite;
+    }
+
+    @keyframes battle-glow {
+      0%, 100% { 
+        filter: brightness(1);
+      }
+      50% { 
+        filter: brightness(1.3);
+      }
+    }
+
+    .piece.battle-piece-reveal {
+      animation: piece-reveal 0.5s ease-out;
+      box-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+    }
+
+    @keyframes piece-reveal {
+      0% {
+        transform: scale(0.8) rotateY(180deg);
+        opacity: 0;
+      }
+      100% {
+        transform: scale(1) rotateY(0deg);
+        opacity: 1;
+      }
+    }
+
+    .battle-indicator {
+      text-align: center;
+      padding: 12px 24px;
+      margin-top: 15px;
+      border-radius: 8px;
+      font-weight: bold;
+      font-size: 20px;
+      background: rgba(255, 217, 61, 0.2);
+      color: #ffd93d;
+      border: 2px solid #ffd93d;
+      animation: indicator-pulse 1s ease-in-out infinite;
+    }
+
+    .thinking-popup {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      padding: 12px 20px;
+      border-radius: 8px;
+      background: #1a1a2e;
+      color: #4d96ff;
+      border: 2px solid #4d96ff;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      font-weight: bold;
+      font-size: 14px;
+      z-index: 1000;
+      white-space: nowrap;
+    }
+
+    .thinking-dots {
+      display: inline-block;
+      width: 24px;
+      text-align: left;
+    }
+
+    .thinking-dots::after {
+      content: '';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+
+    @keyframes dots {
+      0% { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
+      100% { content: ''; }
+    }
+
     .rank {
       font-size: 10px;
       text-transform: uppercase;
@@ -342,53 +641,7 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
       font-size: 24px;
     }
 
-    .move-result {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      padding: 30px;
-      background: #1a1a2e;
-      border-radius: 10px;
-      text-align: center;
-      z-index: 1000;
-      box-shadow: 0 10px 50px rgba(0, 0, 0, 0.8);
-    }
 
-    .move-result.win {
-      border: 2px solid #6bcb77;
-    }
-
-    .move-result.lose {
-      border: 2px solid #e94560;
-    }
-
-    .move-result.draw {
-      border: 2px solid #ffd93d;
-    }
-
-    .move-result.move {
-      border: 2px solid #4d96ff;
-    }
-
-    .move-result h3 {
-      color: #fff;
-      margin-bottom: 10px;
-    }
-
-    .move-result p {
-      color: #ccc;
-      margin-bottom: 20px;
-    }
-
-    .move-result button {
-      padding: 10px 20px;
-      background: #e94560;
-      color: #fff;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
 
     .game-controls {
       text-align: center;
@@ -425,6 +678,19 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
       background: #e94560;
     }
 
+    @media (max-width: 1400px) {
+      .game-layout {
+        flex-direction: column-reverse;
+        align-items: center;
+      }
+
+      .move-console {
+        width: 100%;
+        max-width: 720px;
+        max-height: 200px;
+      }
+    }
+
     @media (max-width: 768px) {
       .cell {
         width: 35px;
@@ -442,6 +708,10 @@ import { PieceSelectorComponent } from '../piece-selector/piece-selector.compone
 
       .rank-number {
         font-size: 10px;
+      }
+
+      .move-console {
+        max-height: 150px;
       }
     }
   `]
@@ -463,7 +733,20 @@ export class GameBoardComponent implements OnInit, OnDestroy {
   selectedPiece: { row: number; col: number } | null = null;
   validMoves: Move[] = [];
   lastMove: { from: { row: number; col: number }; to: { row: number; col: number } } | null = null;
-  lastMoveResult: MoveResult | null = null;
+
+  // Animation state
+  animatingMove: { from: { row: number; col: number }; to: { row: number; col: number }; color: PlayerColor } | null = null;
+  isProcessingMove = false;
+  isThinking = false;
+
+  // Battle preview state
+  battlePreview: {
+    attacker: { row: number; col: number; rank: PieceRank; color: PlayerColor };
+    defender: { row: number; col: number; rank: PieceRank; color: PlayerColor };
+  } | null = null;
+
+  // Move log
+  moveLog: { color: PlayerColor; type: 'move' | 'win' | 'lose' | 'draw'; message: string; timestamp: Date }[] = [];
 
   message = '';
   isError = false;
@@ -475,7 +758,7 @@ export class GameBoardComponent implements OnInit, OnDestroy {
     private router: Router,
     private gameService: GameService,
     private wsService: WebSocketService,
-    private authService: AuthService
+    private cdr: ChangeDetectorRef
   ) {}
 
   ngOnInit(): void {
@@ -556,6 +839,7 @@ export class GameBoardComponent implements OnInit, OnDestroy {
 
   onCellClick(row: number, col: number): void {
     if (this.isLake(row, col)) return;
+    if (this.isProcessingMove) return; // Prevent clicks during animation
 
     // Setup phase
     if (this.game?.status === 'setup' && !this.setupComplete) {
@@ -699,61 +983,264 @@ export class GameBoardComponent implements OnInit, OnDestroy {
            (this.lastMove.to.row === row && this.lastMove.to.col === col);
   }
 
+  isAnimatingFrom(row: number, col: number): boolean {
+    return this.animatingMove?.from.row === row && this.animatingMove?.from.col === col;
+  }
+
+  isAnimatingTo(row: number, col: number): boolean {
+    return this.animatingMove?.to.row === row && this.animatingMove?.to.col === col;
+  }
+
+  getAnimatingColor(): PlayerColor | null {
+    return this.animatingMove?.color || null;
+  }
+
+  isBattleAttacker(row: number, col: number): boolean {
+    return this.battlePreview?.attacker.row === row && this.battlePreview?.attacker.col === col;
+  }
+
+  isBattleDefender(row: number, col: number): boolean {
+    return this.battlePreview?.defender.row === row && this.battlePreview?.defender.col === col;
+  }
+
+  getBattlePiece(row: number, col: number): { rank: PieceRank; color: PlayerColor } | null {
+    if (!this.battlePreview) return null;
+    if (this.battlePreview.attacker.row === row && this.battlePreview.attacker.col === col) {
+      return { rank: this.battlePreview.attacker.rank, color: this.battlePreview.attacker.color };
+    }
+    if (this.battlePreview.defender.row === row && this.battlePreview.defender.col === col) {
+      return { rank: this.battlePreview.defender.rank, color: this.battlePreview.defender.color };
+    }
+    return null;
+  }
+
   private makeMove(fromRow: number, fromCol: number, toRow: number, toCol: number): void {
+    if (this.isProcessingMove) return;
+    this.isProcessingMove = true;
+
     this.gameService.makeMove(this.gameId, fromRow, fromCol, toRow, toCol).subscribe({
       next: (response) => {
-        this.game = response.game;
-        this.board = response.board;
-        this.isMyTurn = this.game.current_turn === this.playerColor;
         this.selectedPiece = null;
         this.validMoves = [];
-        this.lastMove = { from: { row: fromRow, col: fromCol }, to: { row: toRow, col: toCol } };
 
-        if (response.result.type !== 'move') {
-          this.lastMoveResult = response.result;
-        }
+        const isBattle = response.result.type !== 'move';
 
-        // Show AI move result if applicable
-        if (response.ai_result && response.ai_result.type !== 'move') {
+        // Helper to process player move animation
+        const processPlayerMove = () => {
+          this.animatingMove = {
+            from: { row: fromRow, col: fromCol },
+            to: { row: toRow, col: toCol },
+            color: this.playerColor
+          };
+          this.lastMove = { from: { row: fromRow, col: fromCol }, to: { row: toRow, col: toCol } };
+
+          // Update board after player move
+          this.board = response.board;
+          this.game = response.game;
+
+          // Log player's move result
+          this.addMoveToLog(this.playerColor, response.result, { row: fromRow, col: fromCol }, { row: toRow, col: toCol });
+
+          // After delay, clear player animation and check if AI move is needed
           setTimeout(() => {
-            this.lastMoveResult = response.ai_result!;
-          }, 1000);
+            this.animatingMove = null;
+            
+            // If AI move is pending, show thinking and make separate API call
+            if (response.ai_pending) {
+              this.isThinking = true;
+              this.cdr.detectChanges();
+              // Small delay to ensure thinking indicator renders before API call
+              setTimeout(() => {
+                this.requestAiMove();
+              }, 100);
+            } else {
+              // No AI move needed, update final state
+              this.isMyTurn = this.game!.current_turn === this.playerColor;
+              this.lastMove = null;
+              this.isProcessingMove = false;
+            }
+          }, 800);
+        };
+
+        // If this is a battle, show preview first
+        if (isBattle && response.result.attacker && response.result.defender) {
+          this.battlePreview = {
+            attacker: {
+              row: fromRow,
+              col: fromCol,
+              rank: response.result.attacker.rank!,
+              color: this.playerColor
+            },
+            defender: {
+              row: toRow,
+              col: toCol,
+              rank: response.result.defender.rank!,
+              color: this.playerColor === 'red' ? 'blue' : 'red'
+            }
+          };
+
+          // Wait 2 seconds, then clear preview and process move
+          setTimeout(() => {
+            this.battlePreview = null;
+            processPlayerMove();
+          }, 2000);
+        } else {
+          // No battle, just process the move
+          processPlayerMove();
         }
       },
       error: (err) => {
+        this.isProcessingMove = false;
         this.showMessage('Invalid move', true);
       }
+    });
+  }
+
+  private requestAiMove(): void {
+    const startTime = Date.now();
+    const minThinkingTime = 1000; // Show thinking for at least 1 second
+
+    this.gameService.requestAiMove(this.gameId).subscribe({
+      next: (response) => {
+        const elapsed = Date.now() - startTime;
+        const remainingDelay = Math.max(0, minThinkingTime - elapsed);
+        
+        // Ensure thinking shows for at least minThinkingTime
+        setTimeout(() => {
+          this.isThinking = false;
+          this.processAiMove(response);
+        }, remainingDelay);
+      },
+      error: (err) => {
+        this.isThinking = false;
+        this.isProcessingMove = false;
+        this.showMessage('AI move failed', true);
+        this.loadGame(); // Reload game state
+      }
+    });
+  }
+
+  private processAiMove(response: MoveResponse): void {
+    if (response.ai_move && response.ai_result) {
+      const isAiBattle = response.ai_result.type !== 'move';
+      const aiColor = this.playerColor === 'red' ? 'blue' : 'red';
+
+      const processAiMoveAnimation = () => {
+        this.animatingMove = {
+          from: response.ai_move!.from,
+          to: response.ai_move!.to,
+          color: aiColor
+        };
+        this.lastMove = { from: response.ai_move!.from, to: response.ai_move!.to };
+
+        // Update to final board (after AI move)
+        this.board = response.board;
+        this.game = response.game;
+        this.isMyTurn = this.game!.current_turn === this.playerColor;
+
+        // Log AI's move result
+        this.addMoveToLog(aiColor, response.ai_result!, response.ai_move!.from, response.ai_move!.to);
+
+        // Clear AI animation after delay
+        setTimeout(() => {
+          this.animatingMove = null;
+          this.lastMove = null;
+          this.isProcessingMove = false;
+        }, 800);
+      };
+
+      // If AI move is a battle, show preview first
+      if (isAiBattle && response.ai_result.attacker && response.ai_result.defender) {
+        const aiAttacker = response.ai_result.attacker;
+        const aiDefender = response.ai_result.defender;
+        this.battlePreview = {
+          attacker: {
+            row: response.ai_move!.from.row,
+            col: response.ai_move!.from.col,
+            rank: aiAttacker.rank!,
+            color: aiColor
+          },
+          defender: {
+            row: response.ai_move!.to.row,
+            col: response.ai_move!.to.col,
+            rank: aiDefender.rank!,
+            color: this.playerColor
+          }
+        };
+
+        // Wait 2 seconds, then clear preview and process AI move
+        setTimeout(() => {
+          this.battlePreview = null;
+          processAiMoveAnimation();
+        }, 2000);
+      } else {
+        // No AI battle, just process the move
+        processAiMoveAnimation();
+      }
+    } else {
+      // No AI move data, just update final state
+      this.board = response.board;
+      this.game = response.game;
+      this.isMyTurn = this.game!.current_turn === this.playerColor;
+      this.lastMove = null;
+      this.isProcessingMove = false;
+    }
+  }
+
+  private addMoveToLog(color: PlayerColor, result: MoveResult, from: {row: number, col: number}, to: {row: number, col: number}): void {
+    // Only reveal enemy piece ranks when there's actual combat (win/lose/draw)
+    // For simple moves, never show the enemy's moving piece rank
+    const isPlayerMove = color === this.playerColor;
+    const isBattle = result.type === 'win' || result.type === 'lose' || result.type === 'draw';
+    
+    // Format coordinates as (row,col)
+    const moveCoords = `(${from.row},${from.col})→(${to.row},${to.col})`;
+    
+    let attackerName: string;
+    let defenderName: string;
+    
+    if (isPlayerMove) {
+      // Player is attacking - always show player's piece rank
+      attackerName = result.attacker?.rank !== undefined ? PieceNames[result.attacker.rank] : 'Piece';
+      // Only show defender rank if there was a battle
+      defenderName = (isBattle && result.defender?.rank !== undefined) 
+        ? PieceNames[result.defender.rank] 
+        : '???';
+    } else {
+      // AI is attacking - only show AI's piece rank if there was a battle
+      attackerName = (isBattle && result.attacker?.rank !== undefined)
+        ? PieceNames[result.attacker.rank]
+        : '???';
+      // Always show player's piece rank (defender)
+      defenderName = result.defender?.rank !== undefined ? PieceNames[result.defender.rank] : '???';
+    }
+
+    let message: string;
+    switch (result.type) {
+      case 'win':
+        message = `${attackerName} defeats ${defenderName}!\n${moveCoords}`;
+        break;
+      case 'lose':
+        message = `${attackerName} defeated by ${defenderName}\n${moveCoords}`;
+        break;
+      case 'draw':
+        message = `${attackerName} vs ${defenderName} - both eliminated!\n${moveCoords}`;
+        break;
+      default:
+        message = `${attackerName} moves\n${moveCoords}`;
+    }
+
+    this.moveLog.unshift({
+      color,
+      type: result.type,
+      message,
+      timestamp: new Date()
     });
   }
 
   getPieceName(rank: PieceRank | undefined): string {
     if (rank === undefined) return '';
     return PieceNames[rank] || '';
-  }
-
-  getMoveResultTitle(result: MoveResult): string {
-    switch (result.type) {
-      case 'win': return 'Attack Successful!';
-      case 'lose': return 'Attack Failed!';
-      case 'draw': return 'Draw - Both Eliminated!';
-      default: return 'Move Complete';
-    }
-  }
-
-  getMoveResultDescription(result: MoveResult): string {
-    const attackerName = result.attacker?.rank !== undefined ? PieceNames[result.attacker.rank] : 'Unknown';
-    const defenderName = result.defender?.rank !== undefined ? PieceNames[result.defender.rank] : 'Unknown';
-
-    switch (result.type) {
-      case 'win':
-        return `Your ${attackerName} defeated the enemy ${defenderName}!`;
-      case 'lose':
-        return `Your ${attackerName} was defeated by the enemy ${defenderName}!`;
-      case 'draw':
-        return `Both ${attackerName}s were eliminated!`;
-      default:
-        return 'Piece moved successfully';
-    }
   }
 
   formatStatus(status: string): string {

@@ -23,6 +23,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/games/{game}/join', [GameController::class, 'join']);
     Route::post('/games/{game}/setup', [GameController::class, 'setup']);
     Route::post('/games/{game}/move', [GameController::class, 'move']);
+    Route::post('/games/{game}/ai-move', [GameController::class, 'aiMove']);
     Route::post('/games/{game}/valid-moves', [GameController::class, 'validMoves']);
     Route::post('/games/{game}/forfeit', [GameController::class, 'forfeit']);
 });

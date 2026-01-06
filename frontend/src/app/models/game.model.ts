@@ -65,6 +65,7 @@ export interface Game {
   board_state: (Piece | null)[][];
   is_vs_ai: boolean;
   ai_difficulty: AIDifficulty;
+  use_llm: boolean;
   red_setup_complete: boolean;
   blue_setup_complete: boolean;
   created_at: string;
@@ -92,6 +93,7 @@ export interface MoveResponse {
   game: Game;
   board: (Piece | null)[][];
   result: MoveResult;
+  ai_pending?: boolean;
   ai_move?: Move;
   ai_result?: MoveResult;
 }

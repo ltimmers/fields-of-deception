@@ -12,6 +12,7 @@ use App\Events\SetupComplete;
 use App\Models\Game;
 use App\Services\AIService;
 use App\Services\GameService;
+use App\Services\LLMService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -20,8 +21,12 @@ class GameController extends Controller
 {
     public function __construct(
         private readonly GameService $gameService,
-        private readonly AIService $aiService
-    ) {}
+        private readonly AIService $aiService,
+        private readonly LLMService $llmService
+    ) {
+        // Inject LLM service into AI service
+        $this->aiService->setLLMService($this->llmService);
+    }
 
     /**
      * List all games for the current user
@@ -61,7 +66,18 @@ class GameController extends Controller
         $validated = $request->validate([
             'vs_ai' => 'boolean',
             'ai_difficulty' => 'string|in:easy,medium,hard',
+            'use_llm' => 'boolean',
         ]);
+
+        // Validate that use_llm can only be true when vs_ai is true
+        if (($validated['use_llm'] ?? false) && !($validated['vs_ai'] ?? false)) {
+            return response()->json([
+                'message' => 'The use_llm parameter can only be true when vs_ai is true.',
+                'errors' => [
+                    'use_llm' => ['The use_llm field requires vs_ai to be true.']
+                ]
+            ], 422);
+        }
 
         $game = new Game();
         $game->player_red_id = Auth::id();
@@ -70,6 +86,7 @@ class GameController extends Controller
         $game->board_state = $this->gameService->createEmptyBoard();
         $game->is_vs_ai = $validated['vs_ai'] ?? false;
         $game->ai_difficulty = $validated['ai_difficulty'] ?? 'medium';
+        $game->use_llm = $validated['use_llm'] ?? false;
 
         if ($game->is_vs_ai) {
             $game->status = GameStatus::SETUP;
@@ -253,40 +270,81 @@ class GameController extends Controller
             $playerColor
         );
 
+        // Refresh game to get updated state after executeMove saved it
+        $game->refresh();
+
         broadcast(new MoveMade($game, $result, $playerColor))->toOthers();
 
         if ($game->status === GameStatus::FINISHED) {
             broadcast(new GameUpdated($game));
         }
 
+        // Return the board after player's move - AI move will be handled separately
+        $boardAfterPlayerMove = $this->gameService->getBoardForPlayer($game->board_state, $playerColor);
+
+        $aiPending = $game->is_vs_ai && $game->status === GameStatus::IN_PROGRESS && $game->current_turn === PlayerColor::BLUE;
+
         $response = [
             'game' => $game,
-            'board' => $this->gameService->getBoardForPlayer($game->board_state, $playerColor),
+            'board' => $boardAfterPlayerMove,
             'result' => $result,
+            'ai_pending' => $aiPending,
         ];
 
-        // If AI game and game is still in progress, make AI move
-        if ($game->is_vs_ai && $game->status === GameStatus::IN_PROGRESS && $game->current_turn === PlayerColor::BLUE) {
-            $aiMove = $this->aiService->makeMove($game);
+        return response()->json($response);
+    }
 
-            if ($aiMove) {
-                $aiResult = $this->gameService->executeMove(
-                    $game,
-                    $aiMove['from']['row'],
-                    $aiMove['from']['col'],
-                    $aiMove['to']['row'],
-                    $aiMove['to']['col'],
-                    PlayerColor::BLUE
-                );
+    /**
+     * Request AI move (separate endpoint to allow frontend to show "thinking" state)
+     */
+    public function aiMove(Game $game): JsonResponse
+    {
+        $userId = Auth::id();
 
-                $response['ai_move'] = $aiMove;
-                $response['ai_result'] = $aiResult;
-                $response['board'] = $this->gameService->getBoardForPlayer($game->board_state, $playerColor);
-                $response['game'] = $game->fresh();
-            }
+        // Verify this is an AI game and it's the AI's turn
+        if (!$game->is_vs_ai) {
+            return response()->json(['error' => 'Not an AI game'], 400);
         }
 
-        return response()->json($response);
+        if ($game->player_red_id !== $userId) {
+            return response()->json(['error' => 'Not a participant in this game'], 403);
+        }
+
+        if ($game->status !== GameStatus::IN_PROGRESS) {
+            return response()->json(['error' => 'Game is not in progress'], 400);
+        }
+
+        if ($game->current_turn !== PlayerColor::BLUE) {
+            return response()->json(['error' => 'Not AI turn'], 400);
+        }
+
+        $aiMove = $this->aiService->makeMove($game, $game->use_llm);
+
+        if (!$aiMove) {
+            return response()->json(['error' => 'AI could not make a move'], 500);
+        }
+
+        $aiResult = $this->gameService->executeMove(
+            $game,
+            $aiMove['from']['row'],
+            $aiMove['from']['col'],
+            $aiMove['to']['row'],
+            $aiMove['to']['col'],
+            PlayerColor::BLUE
+        );
+
+        broadcast(new MoveMade($game, $aiResult, PlayerColor::BLUE))->toOthers();
+
+        if ($game->status === GameStatus::FINISHED) {
+            broadcast(new GameUpdated($game));
+        }
+
+        return response()->json([
+            'game' => $game->fresh(),
+            'board' => $this->gameService->getBoardForPlayer($game->board_state, PlayerColor::RED),
+            'ai_move' => $aiMove,
+            'ai_result' => $aiResult,
+        ]);
     }
 
     /**

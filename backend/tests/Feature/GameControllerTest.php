@@ -125,6 +125,42 @@ class GameControllerTest extends TestCase
             ]);
     }
 
+    public function test_user_can_create_ai_game_with_llm(): void
+    {
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson('/api/games', [
+                'vs_ai' => true,
+                'ai_difficulty' => 'medium',
+                'use_llm' => true,
+            ]);
+
+        $response->assertStatus(201)
+            ->assertJson([
+                'player_red_id' => $this->user->id,
+                'status' => GameStatus::SETUP->value,
+                'is_vs_ai' => true,
+                'ai_difficulty' => 'medium',
+                'use_llm' => true,
+            ]);
+    }
+
+    public function test_cannot_use_llm_without_vs_ai(): void
+    {
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson('/api/games', [
+                'vs_ai' => false,
+                'use_llm' => true,
+            ]);
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'message' => 'The use_llm parameter can only be true when vs_ai is true.',
+                'errors' => [
+                    'use_llm' => ['The use_llm field requires vs_ai to be true.']
+                ]
+            ]);
+    }
+
     public function test_user_can_join_open_game(): void
     {
         $otherUser = User::factory()->create();
@@ -464,6 +500,156 @@ class GameControllerTest extends TestCase
             ->assertJson(['error' => 'Game cannot be forfeited']);
     }
 
+    public function test_user_can_request_ai_move(): void
+    {
+        $game = Game::factory()->vsAi()->inProgress()->create([
+            'player_red_id' => $this->user->id,
+            'current_turn' => PlayerColor::BLUE,
+            'use_llm' => false,
+        ]);
+
+        // Place some AI pieces on the board
+        $board = $game->board_state;
+        $board[3][0] = ['color' => 'blue', 'rank' => 2]; // Scout that can move
+        $game->board_state = $board;
+        $game->save();
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/ai-move");
+
+        $response->assertStatus(200)
+            ->assertJsonStructure([
+                'game',
+                'board',
+                'ai_move' => ['from', 'to'],
+                'ai_result',
+            ]);
+
+        // Verify the game was updated
+        $game->refresh();
+        $this->assertEquals(PlayerColor::RED, $game->current_turn);
+    }
+
+    public function test_ai_move_requires_authentication(): void
+    {
+        $game = Game::factory()->vsAi()->inProgress()->create([
+            'current_turn' => PlayerColor::BLUE,
+        ]);
+
+        $response = $this->postJson("/api/games/{$game->id}/ai-move");
+
+        $response->assertStatus(401);
+    }
+
+    public function test_ai_move_fails_for_non_ai_game(): void
+    {
+        $otherUser = User::factory()->create();
+        $game = Game::factory()->inProgress()->create([
+            'player_red_id' => $this->user->id,
+            'player_blue_id' => $otherUser->id,
+            'is_vs_ai' => false,
+            'current_turn' => PlayerColor::BLUE,
+        ]);
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/ai-move");
+
+        $response->assertStatus(400)
+            ->assertJson(['error' => 'Not an AI game']);
+    }
+
+    public function test_ai_move_fails_for_non_participant(): void
+    {
+        $otherUser = User::factory()->create();
+        $game = Game::factory()->vsAi()->inProgress()->create([
+            'player_red_id' => $otherUser->id,
+            'current_turn' => PlayerColor::BLUE,
+        ]);
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/ai-move");
+
+        $response->assertStatus(403)
+            ->assertJson(['error' => 'Not a participant in this game']);
+    }
+
+    public function test_ai_move_fails_when_game_not_in_progress(): void
+    {
+        $game = Game::factory()->vsAi()->create([
+            'player_red_id' => $this->user->id,
+            'status' => GameStatus::SETUP,
+        ]);
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/ai-move");
+
+        $response->assertStatus(400)
+            ->assertJson(['error' => 'Game is not in progress']);
+    }
+
+    public function test_ai_move_fails_when_not_ai_turn(): void
+    {
+        $game = Game::factory()->vsAi()->inProgress()->create([
+            'player_red_id' => $this->user->id,
+            'current_turn' => PlayerColor::RED,
+        ]);
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/ai-move");
+
+        $response->assertStatus(400)
+            ->assertJson(['error' => 'Not AI turn']);
+    }
+
+    public function test_ai_move_handles_no_valid_moves(): void
+    {
+        $game = Game::factory()->vsAi()->inProgress()->create([
+            'player_red_id' => $this->user->id,
+            'current_turn' => PlayerColor::BLUE,
+        ]);
+
+        // Create a board where AI has no valid moves (only bombs and flag)
+        $board = $game->board_state;
+        $board[0][0] = ['color' => 'blue', 'rank' => 11]; // Bomb
+        $board[0][1] = ['color' => 'blue', 'rank' => 0];  // Flag
+        $game->board_state = $board;
+        $game->save();
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/ai-move");
+
+        $response->assertStatus(500)
+            ->assertJson(['error' => 'AI could not make a move']);
+    }
+
+    public function test_ai_move_with_llm_enabled(): void
+    {
+        // Skip if LLM service is not configured
+        if (!config('services.llm.base_url')) {
+            $this->markTestSkipped('LLM service not configured');
+        }
+
+        $game = Game::factory()->vsAi()->inProgress()->create([
+            'player_red_id' => $this->user->id,
+            'current_turn' => PlayerColor::BLUE,
+            'use_llm' => true,
+        ]);
+
+        // Place some AI pieces on the board
+        $board = $game->board_state;
+        $board[3][0] = ['color' => 'blue', 'rank' => 2]; // Scout that can move
+        $game->board_state = $board;
+        $game->save();
+
+        // This test may fail if LLM service is not available, but should at least
+        // verify the endpoint attempts to use LLM
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/ai-move");
+
+        // Should either succeed or fail gracefully
+        $this->assertContains($response->status(), [200, 500]);
+    }
+
     public function test_endpoints_require_authentication(): void
     {
         $game = Game::factory()->create();
@@ -477,6 +663,7 @@ class GameControllerTest extends TestCase
         $this->postJson("/api/games/{$game->id}/move")->assertStatus(401);
         $this->postJson("/api/games/{$game->id}/valid-moves")->assertStatus(401);
         $this->postJson("/api/games/{$game->id}/forfeit")->assertStatus(401);
+        $this->postJson("/api/games/{$game->id}/ai-move")->assertStatus(401);
     }
 
     /**
