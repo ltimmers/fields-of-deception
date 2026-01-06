@@ -1123,12 +1123,13 @@ export class GameBoardComponent implements OnInit, OnDestroy {
   private processAiMove(response: MoveResponse): void {
     if (response.ai_move && response.ai_result) {
       const isAiBattle = response.ai_result.type !== 'move';
+      const aiColor = this.playerColor === 'red' ? 'blue' : 'red';
 
       const processAiMoveAnimation = () => {
         this.animatingMove = {
           from: response.ai_move!.from,
           to: response.ai_move!.to,
-          color: 'blue'
+          color: aiColor
         };
         this.lastMove = { from: response.ai_move!.from, to: response.ai_move!.to };
 
@@ -1138,7 +1139,7 @@ export class GameBoardComponent implements OnInit, OnDestroy {
         this.isMyTurn = this.game!.current_turn === this.playerColor;
 
         // Log AI's move result
-        this.addMoveToLog('blue', response.ai_result!, response.ai_move!.from, response.ai_move!.to);
+        this.addMoveToLog(aiColor, response.ai_result!, response.ai_move!.from, response.ai_move!.to);
 
         // Clear AI animation after delay
         setTimeout(() => {
@@ -1157,13 +1158,13 @@ export class GameBoardComponent implements OnInit, OnDestroy {
             row: response.ai_move!.from.row,
             col: response.ai_move!.from.col,
             rank: aiAttacker.rank!,
-            color: 'blue'
+            color: aiColor
           },
           defender: {
             row: response.ai_move!.to.row,
             col: response.ai_move!.to.col,
             rank: aiDefender.rank!,
-            color: 'red'
+            color: this.playerColor
           }
         };
 
