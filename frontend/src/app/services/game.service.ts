@@ -20,11 +20,11 @@ export class GameService {
     return this.http.get<Game[]>(`${this.apiUrl}/games/open`);
   }
 
-  createGame(vsAi: boolean = false, aiDifficulty: AIDifficulty = 'medium', useLlm: boolean = false): Observable<Game> {
+  createGame(vsAi: boolean = false, aiDifficulty: AIDifficulty = 'medium', useLLM: boolean = false): Observable<Game> {
     return this.http.post<Game>(`${this.apiUrl}/games`, {
       vs_ai: vsAi,
       ai_difficulty: aiDifficulty,
-      use_llm: useLlm
+      use_llm: useLLM
     });
   }
 
