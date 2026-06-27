@@ -389,8 +389,13 @@ export class HomeComponent implements OnInit, OnDestroy {
   }
 
   logout(): void {
-    this.authService.logout().subscribe(() => {
-      this.router.navigate(['/login']);
+    this.authService.logout().subscribe({
+      next: () => this.router.navigate(['/login']),
+      error: error => {
+        if (error.status === 401) {
+          this.router.navigate(['/login']);
+        }
+      }
     });
   }
 }

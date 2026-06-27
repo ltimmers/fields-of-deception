@@ -20,6 +20,7 @@ A Stratego-like strategy game built with Laravel 12 (PHP 8.4) and Angular 20.
 - Laravel Sanctum (API authentication)
 - MySQL (database)
 - Redis (caching and sessions)
+- OpenAI-compatible or Azure OpenAI LLM integration for AI moves
 
 ### Frontend
 - Angular 20
@@ -99,6 +100,27 @@ npm start
 ```bash
 cd backend
 php artisan reverb:start
+```
+
+### Configure LLM Provider
+
+The AI opponent can use either a local OpenAI-compatible endpoint or Azure OpenAI.
+
+For local/OpenAI-compatible services:
+```bash
+LLM_PROVIDER=openai_compatible
+LLM_BASE_URL=http://localhost:1234/v1
+LLM_MODEL=local-model
+LLM_API_KEY=
+```
+
+For Azure OpenAI with a GPT-5.4 deployment:
+```bash
+LLM_PROVIDER=azure
+LLM_API_KEY=your-azure-api-key
+AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
+AZURE_OPENAI_API_VERSION=2024-10-21
+AZURE_OPENAI_DEPLOYMENT=gpt-5.4
 ```
 
 ## Testing
