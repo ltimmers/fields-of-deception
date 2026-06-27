@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, tap } from 'rxjs';
+import { BehaviorSubject, Observable, catchError, tap, throwError } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthResponse, LoginRequest, RegisterRequest, User } from '../models/user.model';
 
@@ -22,7 +22,7 @@ export class AuthService {
     const token = this.getToken();
     if (token) {
       this.fetchCurrentUser().subscribe({
-        error: () => this.logout()
+        error: () => this.clearAuthState()
       });
     }
   }
@@ -41,9 +41,13 @@ export class AuthService {
 
   logout(): Observable<any> {
     return this.http.post(`${this.apiUrl}/logout`, {}).pipe(
-      tap(() => {
-        localStorage.removeItem(this.tokenKey);
-        this.currentUserSubject.next(null);
+      tap(() => this.clearAuthState()),
+      catchError(error => {
+        if (error.status === 401) {
+          this.clearAuthState();
+        }
+
+        return throwError(() => error);
       })
     );
   }
@@ -69,5 +73,10 @@ export class AuthService {
   private handleAuthResponse(response: AuthResponse): void {
     localStorage.setItem(this.tokenKey, response.token);
     this.currentUserSubject.next(response.user);
+  }
+
+  private clearAuthState(): void {
+    localStorage.removeItem(this.tokenKey);
+    this.currentUserSubject.next(null);
   }
 }

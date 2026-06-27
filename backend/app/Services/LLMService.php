@@ -11,11 +11,21 @@ use Illuminate\Support\Facades\Log;
 class LLMService
 {
     private string $baseUrl;
+    private string $provider;
+    private ?string $apiKey;
+    private ?string $azureEndpoint;
+    private string $azureApiVersion;
+    private ?string $azureDeployment;
     private GameService $gameService;
 
     public function __construct(GameService $gameService)
     {
-        $this->baseUrl = config('services.llm.base_url', 'http://localhost:1234/v1');
+        $this->baseUrl = rtrim(config('services.llm.base_url', 'http://localhost:1234/v1'), '/');
+        $this->provider = config('services.llm.provider', 'openai_compatible');
+        $this->apiKey = config('services.llm.api_key');
+        $this->azureEndpoint = config('services.llm.azure_endpoint');
+        $this->azureApiVersion = config('services.llm.azure_api_version', '2024-10-21');
+        $this->azureDeployment = config('services.llm.azure_deployment');
         $this->gameService = $gameService;
     }
 
@@ -38,29 +48,7 @@ class LLMService
         $prompt = $this->buildMovePrompt($game, $validMoves);
 
         try {
-            $response = Http::timeout(30)->post("{$this->baseUrl}/chat/completions", [
-                'model' => config('services.llm.model', 'local-model'),
-                'messages' => [
-                    [
-                        'role' => 'system',
-                        'content' => $this->getSystemPrompt(),
-                    ],
-                    [
-                        'role' => 'user',
-                        'content' => $prompt,
-                    ],
-                ],
-                'response_format' => [
-                    'type' => 'json_schema',
-                    'json_schema' => [
-                        'name' => 'stratego_move',
-                        'strict' => true,
-                        'schema' => $this->getMoveSchema(count($validMoves) - 1),
-                    ],
-                ],
-                'temperature' => 0.3,
-                'max_tokens' => 150,
-            ]);
+            $response = $this->createRequest()->post($this->getChatCompletionsUrl(), $this->buildRequestPayload($prompt, count($validMoves) - 1));
 
             if ($response->successful()) {
                 $data = $response->json();
@@ -110,6 +98,69 @@ class LLMService
 
         // Final fallback: return a random valid move when no valid move was parsed from a successful LLM response
         return $validMoves[array_rand($validMoves)];
+    }
+
+    private function createRequest()
+    {
+        $request = Http::timeout(30);
+
+        if ($this->provider === 'azure') {
+            if ($this->apiKey) {
+                $request = $request->withHeaders(['api-key' => $this->apiKey]);
+            }
+
+            return $request;
+        }
+
+        if ($this->apiKey) {
+            $request = $request->withToken($this->apiKey);
+        }
+
+        return $request;
+    }
+
+    private function getChatCompletionsUrl(): string
+    {
+        if ($this->provider === 'azure') {
+            $endpoint = rtrim($this->azureEndpoint ?: '', '/');
+            $deployment = $this->azureDeployment ?: config('services.llm.model', 'local-model');
+
+            return "{$endpoint}/openai/deployments/{$deployment}/chat/completions?api-version={$this->azureApiVersion}";
+        }
+
+        return "{$this->baseUrl}/chat/completions";
+    }
+
+    private function buildRequestPayload(string $prompt, int $maxMove): array
+    {
+        $payload = [
+            'messages' => [
+                [
+                    'role' => 'system',
+                    'content' => $this->getSystemPrompt(),
+                ],
+                [
+                    'role' => 'user',
+                    'content' => $prompt,
+                ],
+            ],
+            'response_format' => [
+                'type' => 'json_schema',
+                'json_schema' => [
+                    'name' => 'stratego_move',
+                    'strict' => true,
+                    'schema' => $this->getMoveSchema($maxMove),
+                ],
+            ],
+            'temperature' => 0.3,
+            'max_tokens' => 150,
+        ];
+
+        if ($this->provider !== 'azure') {
+            $payload['model'] = config('services.llm.model', 'local-model');
+        }
+
+        return $payload;
     }
 
     /**

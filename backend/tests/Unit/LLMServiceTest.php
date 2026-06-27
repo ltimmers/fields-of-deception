@@ -292,9 +292,9 @@ class LLMServiceTest extends TestCase
                    $data['messages'][1]['role'] === 'user' &&
                    isset($data['response_format']) &&
                    isset($data['temperature']) &&
-                   $data['temperature'] === 0.7 &&
+                   $data['temperature'] === 0.3 &&
                    isset($data['max_tokens']) &&
-                   $data['max_tokens'] === 100;
+                   $data['max_tokens'] === 150;
         });
     }
 
@@ -370,7 +370,7 @@ class LLMServiceTest extends TestCase
     public function test_generate_move_uses_configured_model(): void
     {
         config(['services.llm.model' => 'test-model-name']);
-        
+
         $llmService = new LLMService($this->gameService);
         $game = $this->createGameWithMoves();
         $validMoves = $this->getValidMoves();
@@ -398,6 +398,50 @@ class LLMServiceTest extends TestCase
         Http::assertSent(function ($request) {
             $data = $request->data();
             return $data['model'] === 'test-model-name';
+        });
+    }
+
+    public function test_generate_move_uses_azure_configuration(): void
+    {
+        config([
+            'services.llm.provider' => 'azure',
+            'services.llm.api_key' => 'azure-test-key',
+            'services.llm.azure_endpoint' => 'https://test-resource.openai.azure.com',
+            'services.llm.azure_api_version' => '2024-10-21',
+            'services.llm.azure_deployment' => 'gpt-5.4',
+            'services.llm.model' => 'should-not-be-sent',
+        ]);
+
+        $llmService = new LLMService($this->gameService);
+        $game = $this->createGameWithMoves();
+        $validMoves = $this->getValidMoves();
+
+        $this->gameService->method('getValidMoves')
+            ->willReturn($validMoves);
+
+        Http::fake([
+            'https://test-resource.openai.azure.com/openai/deployments/gpt-5.4/chat/completions?api-version=2024-10-21' => Http::response([
+                'choices' => [
+                    [
+                        'message' => [
+                            'content' => json_encode([
+                                'move' => 0,
+                                'why' => 'Test',
+                            ]),
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $llmService->generateMove($game);
+
+        Http::assertSent(function ($request) {
+            $data = $request->data();
+
+            return $request->hasHeader('api-key', 'azure-test-key') &&
+                   $request->url() === 'https://test-resource.openai.azure.com/openai/deployments/gpt-5.4/chat/completions?api-version=2024-10-21' &&
+                   !isset($data['model']);
         });
     }
 
