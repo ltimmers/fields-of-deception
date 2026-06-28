@@ -153,8 +153,13 @@ class LLMService
                 ],
             ],
             'temperature' => 0.3,
-            'max_tokens' => 150,
         ];
+
+        if ($this->provider === 'azure') {
+            $payload['max_completion_tokens'] = 150;
+        } else {
+            $payload['max_tokens'] = 150;
+        }
 
         if ($this->provider !== 'azure') {
             $payload['model'] = config('services.llm.model', 'local-model');

@@ -441,7 +441,9 @@ class LLMServiceTest extends TestCase
 
             return $request->hasHeader('api-key', 'azure-test-key') &&
                    $request->url() === 'https://test-resource.openai.azure.com/openai/deployments/gpt-5.4/chat/completions?api-version=2024-10-21' &&
-                   !isset($data['model']);
+                   !isset($data['model']) &&
+                   !isset($data['max_tokens']) &&
+                   ($data['max_completion_tokens'] ?? null) === 150;
         });
     }
 
