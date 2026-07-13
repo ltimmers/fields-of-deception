@@ -16,6 +16,7 @@ use App\Services\LLMService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class GameController extends Controller
 {
@@ -94,6 +95,14 @@ class GameController extends Controller
 
         $game->save();
 
+        Log::info('Game created', [
+            'game_id' => $game->id,
+            'player_red_id' => $game->player_red_id,
+            'is_vs_ai' => $game->is_vs_ai,
+            'ai_difficulty' => $game->ai_difficulty,
+            'use_llm' => $game->use_llm,
+        ]);
+
         broadcast(new GameCreated($game))->toOthers();
 
         return response()->json($game, 201);
@@ -119,6 +128,12 @@ class GameController extends Controller
         $game->player_blue_id = Auth::id();
         $game->status = GameStatus::SETUP;
         $game->save();
+
+        Log::info('Game joined', [
+            'game_id' => $game->id,
+            'player_red_id' => $game->player_red_id,
+            'player_blue_id' => $game->player_blue_id,
+        ]);
 
         broadcast(new GameStarted($game));
 
@@ -206,6 +221,16 @@ class GameController extends Controller
 
         $game->save();
 
+        Log::info('Player setup completed', [
+            'game_id' => $game->id,
+            'player_id' => $userId,
+            'player_color' => $playerColor->value,
+            'is_vs_ai' => $game->is_vs_ai,
+            'status' => $game->status->value,
+            'red_setup_complete' => $game->red_setup_complete,
+            'blue_setup_complete' => $game->blue_setup_complete,
+        ]);
+
         broadcast(new SetupComplete($game, $playerColor))->toOthers();
 
         if ($game->status === GameStatus::IN_PROGRESS) {
@@ -258,6 +283,14 @@ class GameController extends Controller
             $validated['to_col'],
             $playerColor
         )) {
+            Log::warning('Invalid player move attempted', [
+                'game_id' => $game->id,
+                'player_id' => $userId,
+                'player_color' => $playerColor->value,
+                'from' => ['row' => $validated['from_row'], 'col' => $validated['from_col']],
+                'to' => ['row' => $validated['to_row'], 'col' => $validated['to_col']],
+            ]);
+
             return response()->json(['error' => 'Invalid move'], 400);
         }
 
@@ -272,6 +305,19 @@ class GameController extends Controller
 
         // Refresh game to get updated state after executeMove saved it
         $game->refresh();
+
+        Log::info('Player move executed', [
+            'game_id' => $game->id,
+            'player_id' => $userId,
+            'player_color' => $playerColor->value,
+            'from' => ['row' => $validated['from_row'], 'col' => $validated['from_col']],
+            'to' => ['row' => $validated['to_row'], 'col' => $validated['to_col']],
+            'result' => $result['type'],
+            'captured' => $result['captured'] !== null,
+            'winner' => $result['winner']?->value,
+            'next_turn' => $game->current_turn?->value,
+            'status' => $game->status->value,
+        ]);
 
         broadcast(new MoveMade($game, $result, $playerColor))->toOthers();
 
@@ -321,6 +367,12 @@ class GameController extends Controller
         $aiMove = $this->aiService->makeMove($game, $game->use_llm);
 
         if (!$aiMove) {
+            Log::warning('AI could not select a move', [
+                'game_id' => $game->id,
+                'use_llm' => $game->use_llm,
+                'ai_difficulty' => $game->ai_difficulty,
+            ]);
+
             return response()->json(['error' => 'AI could not make a move'], 500);
         }
 
@@ -332,6 +384,19 @@ class GameController extends Controller
             $aiMove['to']['col'],
             PlayerColor::BLUE
         );
+
+        Log::info('AI move executed', [
+            'game_id' => $game->id,
+            'use_llm' => $game->use_llm,
+            'ai_difficulty' => $game->ai_difficulty,
+            'from' => $aiMove['from'],
+            'to' => $aiMove['to'],
+            'result' => $aiResult['type'],
+            'captured' => $aiResult['captured'] !== null,
+            'winner' => $aiResult['winner']?->value,
+            'next_turn' => $game->current_turn?->value,
+            'status' => $game->status->value,
+        ]);
 
         broadcast(new MoveMade($game, $aiResult, PlayerColor::BLUE))->toOthers();
 
