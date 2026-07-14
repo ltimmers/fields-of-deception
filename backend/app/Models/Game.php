@@ -27,6 +27,10 @@ class Game extends Model
         'blue_setup_complete',
     ];
 
+    protected $hidden = [
+        'board_state',
+    ];
+
     protected function casts(): array
     {
         return [
