@@ -16,6 +16,7 @@ use App\Services\LLMService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class GameController extends Controller
@@ -113,21 +114,33 @@ class GameController extends Controller
      */
     public function join(Game $game): JsonResponse
     {
-        if ($game->status !== GameStatus::WAITING) {
-            return response()->json(['error' => 'Game is not available to join'], 400);
-        }
+        $userId = Auth::id();
 
-        if ($game->player_red_id === Auth::id()) {
-            return response()->json(['error' => 'Cannot join your own game'], 400);
-        }
+        $game = DB::transaction(function () use ($game, $userId) {
+            $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
 
-        if ($game->is_vs_ai) {
-            return response()->json(['error' => 'Cannot join AI game'], 400);
-        }
+            if ($lockedGame->status !== GameStatus::WAITING || $lockedGame->player_blue_id !== null) {
+                return response()->json(['error' => 'Game is not available to join'], 400);
+            }
 
-        $game->player_blue_id = Auth::id();
-        $game->status = GameStatus::SETUP;
-        $game->save();
+            if ($lockedGame->player_red_id === $userId) {
+                return response()->json(['error' => 'Cannot join your own game'], 400);
+            }
+
+            if ($lockedGame->is_vs_ai) {
+                return response()->json(['error' => 'Cannot join AI game'], 400);
+            }
+
+            $lockedGame->player_blue_id = $userId;
+            $lockedGame->status = GameStatus::SETUP;
+            $lockedGame->save();
+
+            return $lockedGame;
+        });
+
+        if ($game instanceof JsonResponse) {
+            return $game;
+        }
 
         Log::info('Game joined', [
             'game_id' => $game->id,
@@ -148,13 +161,8 @@ class GameController extends Controller
         $userId = Auth::id();
         $playerColor = $game->getPlayerColor($userId);
 
-        if (!$playerColor && !$game->is_vs_ai) {
+        if (!$playerColor) {
             return response()->json(['error' => 'Not a participant in this game'], 403);
-        }
-
-        // For AI games, player is always red
-        if ($game->is_vs_ai) {
-            $playerColor = PlayerColor::RED;
         }
 
         $boardForPlayer = $this->gameService->getBoardForPlayer($game->board_state, $playerColor);
@@ -173,20 +181,6 @@ class GameController extends Controller
     public function setup(Request $request, Game $game): JsonResponse
     {
         $userId = Auth::id();
-        $playerColor = $game->getPlayerColor($userId);
-
-        // For AI games, player is always red
-        if ($game->is_vs_ai && $game->player_red_id === $userId) {
-            $playerColor = PlayerColor::RED;
-        }
-
-        if (!$playerColor) {
-            return response()->json(['error' => 'Not a participant in this game'], 403);
-        }
-
-        if ($game->status !== GameStatus::SETUP) {
-            return response()->json(['error' => 'Game is not in setup phase'], 400);
-        }
 
         $validated = $request->validate([
             'pieces' => 'required|array',
@@ -195,31 +189,67 @@ class GameController extends Controller
             'pieces.*.rank' => 'required|integer|min:0|max:11',
         ]);
 
-        if (!$this->gameService->validateSetup($validated['pieces'], $playerColor)) {
-            return response()->json(['error' => 'Invalid piece setup'], 400);
+        $result = DB::transaction(function () use ($game, $userId, $validated) {
+            $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
+            $playerColor = $lockedGame->getPlayerColor($userId);
+
+            if (!$playerColor) {
+                return response()->json(['error' => 'Not a participant in this game'], 403);
+            }
+
+            if ($lockedGame->status !== GameStatus::SETUP) {
+                return response()->json(['error' => 'Game is not in setup phase'], 400);
+            }
+
+            if (($playerColor === PlayerColor::RED && $lockedGame->red_setup_complete) ||
+                ($playerColor === PlayerColor::BLUE && $lockedGame->blue_setup_complete)) {
+                return response()->json(['error' => 'Setup already submitted'], 400);
+            }
+
+            if (!$this->gameService->validateSetup($validated['pieces'], $playerColor)) {
+                return response()->json(['error' => 'Invalid piece setup'], 400);
+            }
+
+            $lockedGame->board_state = $this->gameService->placePieces(
+                $lockedGame->board_state,
+                $validated['pieces'],
+                $playerColor
+            );
+
+            if ($playerColor === PlayerColor::RED) {
+                $lockedGame->red_setup_complete = true;
+            } else {
+                $lockedGame->blue_setup_complete = true;
+            }
+
+            if ($lockedGame->is_vs_ai && $playerColor === PlayerColor::RED) {
+                $aiPieces = $this->aiService->generateSetup(PlayerColor::BLUE);
+                $lockedGame->board_state = $this->gameService->placePieces(
+                    $lockedGame->board_state,
+                    $aiPieces,
+                    PlayerColor::BLUE
+                );
+                $lockedGame->blue_setup_complete = true;
+            }
+
+            if ($lockedGame->isSetupComplete()) {
+                $lockedGame->status = GameStatus::IN_PROGRESS;
+            }
+
+            $lockedGame->save();
+
+            return [
+                'game' => $lockedGame,
+                'player_color' => $playerColor,
+            ];
+        });
+
+        if ($result instanceof JsonResponse) {
+            return $result;
         }
 
-        $board = $this->gameService->placePieces($game->board_state, $validated['pieces'], $playerColor);
-        $game->board_state = $board;
-
-        if ($playerColor === PlayerColor::RED) {
-            $game->red_setup_complete = true;
-        } else {
-            $game->blue_setup_complete = true;
-        }
-
-        // For AI games, set up AI pieces automatically
-        if ($game->is_vs_ai && $playerColor === PlayerColor::RED) {
-            $aiPieces = $this->aiService->generateSetup(PlayerColor::BLUE);
-            $game->board_state = $this->gameService->placePieces($game->board_state, $aiPieces, PlayerColor::BLUE);
-            $game->blue_setup_complete = true;
-        }
-
-        if ($game->isSetupComplete()) {
-            $game->status = GameStatus::IN_PROGRESS;
-        }
-
-        $game->save();
+        $game = $result['game'];
+        $playerColor = $result['player_color'];
 
         Log::info('Player setup completed', [
             'game_id' => $game->id,
@@ -249,24 +279,6 @@ class GameController extends Controller
     public function move(Request $request, Game $game): JsonResponse
     {
         $userId = Auth::id();
-        $playerColor = $game->getPlayerColor($userId);
-
-        // For AI games, player is always red
-        if ($game->is_vs_ai && $game->player_red_id === $userId) {
-            $playerColor = PlayerColor::RED;
-        }
-
-        if (!$playerColor) {
-            return response()->json(['error' => 'Not a participant in this game'], 403);
-        }
-
-        if ($game->status !== GameStatus::IN_PROGRESS) {
-            return response()->json(['error' => 'Game is not in progress'], 400);
-        }
-
-        if ($game->current_turn !== $playerColor) {
-            return response()->json(['error' => 'Not your turn'], 400);
-        }
 
         $validated = $request->validate([
             'from_row' => 'required|integer|min:0|max:9',
@@ -275,36 +287,64 @@ class GameController extends Controller
             'to_col' => 'required|integer|min:0|max:9',
         ]);
 
-        if (!$this->gameService->validateMove(
-            $game,
-            $validated['from_row'],
-            $validated['from_col'],
-            $validated['to_row'],
-            $validated['to_col'],
-            $playerColor
-        )) {
-            Log::warning('Invalid player move attempted', [
-                'game_id' => $game->id,
-                'player_id' => $userId,
-                'player_color' => $playerColor->value,
-                'from' => ['row' => $validated['from_row'], 'col' => $validated['from_col']],
-                'to' => ['row' => $validated['to_row'], 'col' => $validated['to_col']],
-            ]);
+        $transactionResult = DB::transaction(function () use ($game, $userId, $validated) {
+            $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
+            $playerColor = $lockedGame->getPlayerColor($userId);
 
-            return response()->json(['error' => 'Invalid move'], 400);
+            if (!$playerColor) {
+                return response()->json(['error' => 'Not a participant in this game'], 403);
+            }
+
+            if ($lockedGame->status !== GameStatus::IN_PROGRESS) {
+                return response()->json(['error' => 'Game is not in progress'], 400);
+            }
+
+            if ($lockedGame->current_turn !== $playerColor) {
+                return response()->json(['error' => 'Not your turn'], 400);
+            }
+
+            if (!$this->gameService->validateMove(
+                $lockedGame,
+                $validated['from_row'],
+                $validated['from_col'],
+                $validated['to_row'],
+                $validated['to_col'],
+                $playerColor
+            )) {
+                Log::warning('Invalid player move attempted', [
+                    'game_id' => $lockedGame->id,
+                    'player_id' => $userId,
+                    'player_color' => $playerColor->value,
+                    'from' => ['row' => $validated['from_row'], 'col' => $validated['from_col']],
+                    'to' => ['row' => $validated['to_row'], 'col' => $validated['to_col']],
+                ]);
+
+                return response()->json(['error' => 'Invalid move'], 400);
+            }
+
+            $moveResult = $this->gameService->executeMove(
+                $lockedGame,
+                $validated['from_row'],
+                $validated['from_col'],
+                $validated['to_row'],
+                $validated['to_col'],
+                $playerColor
+            );
+
+            return [
+                'game' => $lockedGame->fresh(),
+                'result' => $moveResult,
+                'player_color' => $playerColor,
+            ];
+        });
+
+        if ($transactionResult instanceof JsonResponse) {
+            return $transactionResult;
         }
 
-        $result = $this->gameService->executeMove(
-            $game,
-            $validated['from_row'],
-            $validated['from_col'],
-            $validated['to_row'],
-            $validated['to_col'],
-            $playerColor
-        );
-
-        // Refresh game to get updated state after executeMove saved it
-        $game->refresh();
+        $game = $transactionResult['game'];
+        $result = $transactionResult['result'];
+        $playerColor = $transactionResult['player_color'];
 
         Log::info('Player move executed', [
             'game_id' => $game->id,
@@ -325,19 +365,15 @@ class GameController extends Controller
             broadcast(new GameUpdated($game));
         }
 
-        // Return the board after player's move - AI move will be handled separately
         $boardAfterPlayerMove = $this->gameService->getBoardForPlayer($game->board_state, $playerColor);
-
         $aiPending = $game->is_vs_ai && $game->status === GameStatus::IN_PROGRESS && $game->current_turn === PlayerColor::BLUE;
 
-        $response = [
+        return response()->json([
             'game' => $game,
             'board' => $boardAfterPlayerMove,
             'result' => $result,
             'ai_pending' => $aiPending,
-        ];
-
-        return response()->json($response);
+        ]);
     }
 
     /**
@@ -347,43 +383,60 @@ class GameController extends Controller
     {
         $userId = Auth::id();
 
-        // Verify this is an AI game and it's the AI's turn
-        if (!$game->is_vs_ai) {
-            return response()->json(['error' => 'Not an AI game'], 400);
+        $transactionResult = DB::transaction(function () use ($game, $userId) {
+            $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
+
+            if (!$lockedGame->is_vs_ai) {
+                return response()->json(['error' => 'Not an AI game'], 400);
+            }
+
+            if ($lockedGame->player_red_id !== $userId) {
+                return response()->json(['error' => 'Not a participant in this game'], 403);
+            }
+
+            if ($lockedGame->status !== GameStatus::IN_PROGRESS) {
+                return response()->json(['error' => 'Game is not in progress'], 400);
+            }
+
+            if ($lockedGame->current_turn !== PlayerColor::BLUE) {
+                return response()->json(['error' => 'Not AI turn'], 400);
+            }
+
+            $aiMove = $this->aiService->makeMove($lockedGame, $lockedGame->use_llm);
+
+            if (!$aiMove) {
+                Log::warning('AI could not select a move', [
+                    'game_id' => $lockedGame->id,
+                    'use_llm' => $lockedGame->use_llm,
+                    'ai_difficulty' => $lockedGame->ai_difficulty,
+                ]);
+
+                return response()->json(['error' => 'AI could not make a move'], 500);
+            }
+
+            $aiResult = $this->gameService->executeMove(
+                $lockedGame,
+                $aiMove['from']['row'],
+                $aiMove['from']['col'],
+                $aiMove['to']['row'],
+                $aiMove['to']['col'],
+                PlayerColor::BLUE
+            );
+
+            return [
+                'game' => $lockedGame->fresh(),
+                'ai_move' => $aiMove,
+                'ai_result' => $aiResult,
+            ];
+        });
+
+        if ($transactionResult instanceof JsonResponse) {
+            return $transactionResult;
         }
 
-        if ($game->player_red_id !== $userId) {
-            return response()->json(['error' => 'Not a participant in this game'], 403);
-        }
-
-        if ($game->status !== GameStatus::IN_PROGRESS) {
-            return response()->json(['error' => 'Game is not in progress'], 400);
-        }
-
-        if ($game->current_turn !== PlayerColor::BLUE) {
-            return response()->json(['error' => 'Not AI turn'], 400);
-        }
-
-        $aiMove = $this->aiService->makeMove($game, $game->use_llm);
-
-        if (!$aiMove) {
-            Log::warning('AI could not select a move', [
-                'game_id' => $game->id,
-                'use_llm' => $game->use_llm,
-                'ai_difficulty' => $game->ai_difficulty,
-            ]);
-
-            return response()->json(['error' => 'AI could not make a move'], 500);
-        }
-
-        $aiResult = $this->gameService->executeMove(
-            $game,
-            $aiMove['from']['row'],
-            $aiMove['from']['col'],
-            $aiMove['to']['row'],
-            $aiMove['to']['col'],
-            PlayerColor::BLUE
-        );
+        $game = $transactionResult['game'];
+        $aiMove = $transactionResult['ai_move'];
+        $aiResult = $transactionResult['ai_result'];
 
         Log::info('AI move executed', [
             'game_id' => $game->id,
@@ -405,7 +458,7 @@ class GameController extends Controller
         }
 
         return response()->json([
-            'game' => $game->fresh(),
+            'game' => $game,
             'board' => $this->gameService->getBoardForPlayer($game->board_state, PlayerColor::RED),
             'ai_move' => $aiMove,
             'ai_result' => $aiResult,
@@ -454,26 +507,32 @@ class GameController extends Controller
     public function forfeit(Game $game): JsonResponse
     {
         $userId = Auth::id();
-        $playerColor = $game->getPlayerColor($userId);
 
-        if ($game->is_vs_ai && $game->player_red_id === $userId) {
-            $playerColor = PlayerColor::RED;
+        $result = DB::transaction(function () use ($game, $userId) {
+            $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
+            $playerColor = $lockedGame->getPlayerColor($userId);
+
+            if (!$playerColor) {
+                return response()->json(['error' => 'Not a participant in this game'], 403);
+            }
+
+            if ($lockedGame->status !== GameStatus::IN_PROGRESS && $lockedGame->status !== GameStatus::SETUP) {
+                return response()->json(['error' => 'Game cannot be forfeited'], 400);
+            }
+
+            $lockedGame->status = GameStatus::FINISHED;
+            $lockedGame->winner = $playerColor === PlayerColor::RED ? PlayerColor::BLUE : PlayerColor::RED;
+            $lockedGame->save();
+
+            return $lockedGame;
+        });
+
+        if ($result instanceof JsonResponse) {
+            return $result;
         }
 
-        if (!$playerColor) {
-            return response()->json(['error' => 'Not a participant in this game'], 403);
-        }
+        broadcast(new GameUpdated($result));
 
-        if ($game->status !== GameStatus::IN_PROGRESS && $game->status !== GameStatus::SETUP) {
-            return response()->json(['error' => 'Game cannot be forfeited'], 400);
-        }
-
-        $game->status = GameStatus::FINISHED;
-        $game->winner = $playerColor === PlayerColor::RED ? PlayerColor::BLUE : PlayerColor::RED;
-        $game->save();
-
-        broadcast(new GameUpdated($game));
-
-        return response()->json($game);
+        return response()->json($result);
     }
 }

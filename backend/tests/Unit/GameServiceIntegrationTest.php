@@ -164,12 +164,14 @@ class GameServiceIntegrationTest extends TestCase
         $game = $this->createGameWithPiece(PlayerColor::RED, 6, 0, PieceRank::SCOUT);
 
         $this->gameService->executeMove($game, 6, 0, 5, 0, PlayerColor::RED);
-        
+
         // Prepare for second move
+        $game->refresh();
         $board = $game->board_state;
         $board[6][1] = ['color' => 'blue', 'rank' => PieceRank::SCOUT->value, 'revealed' => false];
         $game->board_state = $board;
         $game->current_turn = PlayerColor::BLUE;
+        $game->status = GameStatus::IN_PROGRESS;
         $game->save();
 
         $this->gameService->executeMove($game, 6, 1, 5, 1, PlayerColor::BLUE);

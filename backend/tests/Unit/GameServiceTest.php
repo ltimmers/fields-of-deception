@@ -88,6 +88,17 @@ class GameServiceTest extends TestCase
         $this->assertTrue($result);
     }
 
+    public function test_validate_setup_rejects_duplicate_coordinates(): void
+    {
+        $pieces = $this->generateValidSetup(PlayerColor::RED);
+        $pieces[1]['row'] = $pieces[0]['row'];
+        $pieces[1]['col'] = $pieces[0]['col'];
+
+        $result = $this->gameService->validateSetup($pieces, PlayerColor::RED);
+
+        $this->assertFalse($result);
+    }
+
     public function test_validate_setup_rejects_wrong_piece_count(): void
     {
         $pieces = array_map(fn($i) => [

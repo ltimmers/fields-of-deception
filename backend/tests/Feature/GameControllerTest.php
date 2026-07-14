@@ -93,9 +93,9 @@ class GameControllerTest extends TestCase
                 'player_red_id',
                 'status',
                 'current_turn',
-                'board_state',
                 'is_vs_ai',
             ])
+            ->assertJsonMissingPath('board_state')
             ->assertJson([
                 'player_red_id' => $this->user->id,
                 'status' => GameStatus::WAITING->value,
@@ -266,6 +266,42 @@ class GameControllerTest extends TestCase
             ->assertJson(['error' => 'Not a participant in this game']);
     }
 
+    public function test_user_cannot_view_ai_game_as_non_owner(): void
+    {
+        $otherUser = User::factory()->create();
+        $game = Game::factory()->vsAi()->create([
+            'player_red_id' => $otherUser->id,
+        ]);
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->getJson("/api/games/{$game->id}");
+
+        $response->assertStatus(403)
+            ->assertJson(['error' => 'Not a participant in this game']);
+    }
+
+    public function test_game_response_does_not_leak_raw_board_state(): void
+    {
+        $otherUser = User::factory()->create();
+        $game = Game::factory()->inProgress()->create([
+            'player_red_id' => $this->user->id,
+            'player_blue_id' => $otherUser->id,
+        ]);
+
+        $board = $game->board_state;
+        $board[0][0] = ['color' => 'blue', 'rank' => 10, 'revealed' => false];
+        $game->board_state = $board;
+        $game->save();
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->getJson("/api/games/{$game->id}");
+
+        $response->assertStatus(200)
+            ->assertJsonMissingPath('game.board_state')
+            ->assertJsonPath('board.0.0.hidden', true)
+            ->assertJsonMissingPath('board.0.0.rank');
+    }
+
     public function test_user_can_complete_setup(): void
     {
         $gameService = new GameService();
@@ -329,6 +365,46 @@ class GameControllerTest extends TestCase
 
         $response->assertStatus(400)
             ->assertJson(['error' => 'Game is not in setup phase']);
+    }
+
+    public function test_setup_fails_with_duplicate_coordinates(): void
+    {
+        $game = Game::factory()->create([
+            'player_red_id' => $this->user->id,
+            'status' => GameStatus::SETUP,
+        ]);
+
+        $pieces = $this->generateValidSetup(PlayerColor::RED);
+        $pieces[1]['row'] = $pieces[0]['row'];
+        $pieces[1]['col'] = $pieces[0]['col'];
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/setup", [
+                'pieces' => $pieces,
+            ]);
+
+        $response->assertStatus(400)
+            ->assertJson(['error' => 'Invalid piece setup']);
+    }
+
+    public function test_setup_cannot_be_submitted_twice(): void
+    {
+        $game = Game::factory()->create([
+            'player_red_id' => $this->user->id,
+            'status' => GameStatus::SETUP,
+        ]);
+
+        $pieces = $this->generateValidSetup(PlayerColor::RED);
+
+        $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/setup", ['pieces' => $pieces])
+            ->assertStatus(200);
+
+        $response = $this->withHeaders($this->authHeaders())
+            ->postJson("/api/games/{$game->id}/setup", ['pieces' => $pieces]);
+
+        $response->assertStatus(400)
+            ->assertJson(['error' => 'Setup already submitted']);
     }
 
     public function test_user_can_make_valid_move(): void
@@ -514,6 +590,7 @@ class GameControllerTest extends TestCase
         // Add red pieces so the game doesn't end immediately
         $board[6][0] = ['color' => 'red', 'rank' => 2, 'revealed' => false];
         $board[6][1] = ['color' => 'red', 'rank' => 0, 'revealed' => false]; // Flag
+        $board[6][2] = ['color' => 'red', 'rank' => 3, 'revealed' => false];
         $game->board_state = $board;
         $game->save();
 
