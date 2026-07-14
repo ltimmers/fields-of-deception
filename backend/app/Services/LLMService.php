@@ -43,7 +43,6 @@ class LLMService
             return null;
         }
 
-        // Re-index to ensure sequential numbering from 0
         $validMoves = array_values($validMoves);
         $prompt = $this->buildMovePrompt($game, $validMoves);
 
@@ -52,52 +51,132 @@ class LLMService
 
             if ($response->successful()) {
                 $data = $response->json();
-
                 $content = $data['choices'][0]['message']['content'] ?? null;
 
                 if ($content) {
                     $result = json_decode($content, true);
-                    
-                    // Try to get move index from response
-                    $moveIndex = $result['move'] ?? null;
-                    
-                    // Fallback: try to extract number from truncated/malformed response
-                    if ($moveIndex === null && preg_match('/"move"\s*:\s*(\d+)/', $content, $matches)) {
-                        $moveIndex = (int) $matches[1];
+                    $moveIndex = $this->extractMoveIndex($result, $content);
+                    $alternativeIndexes = $this->extractAlternativeIndexes($result, $content);
+                    $selectedIndex = $this->selectMoveIndex($moveIndex, $alternativeIndexes, $validMoves, $game);
+
+                    if ($selectedIndex !== null) {
+                        Log::info('LLM move generated', [
+                            'move_index' => $selectedIndex,
+                            'requested_move_index' => $moveIndex,
+                            'alternatives' => $alternativeIndexes,
+                            'move' => $validMoves[$selectedIndex],
+                            'why' => is_array($result) ? ($result['why'] ?? '') : '',
+                        ]);
+
+                        return $validMoves[$selectedIndex];
                     }
 
-                    if ($moveIndex !== null && isset($validMoves[$moveIndex])) {
-                        Log::info('LLM move generated', [
-                            'move_index' => $moveIndex,
-                            'move' => $validMoves[$moveIndex],
-                            'why' => $result['why'] ?? '',
-                        ]);
-                        return $validMoves[$moveIndex];
-                    } else {
-                        Log::warning('LLM returned invalid move index', [
-                            'move_index' => $moveIndex,
-                            'max_index' => count($validMoves) - 1,
-                            'raw_content' => substr($content, 0, 200),
-                        ]);
-                        // Fallback to random valid move
-                        return $validMoves[array_rand($validMoves)];
-                    }
+                    Log::warning('LLM returned invalid move indexes', [
+                        'move_index' => $moveIndex,
+                        'alternatives' => $alternativeIndexes,
+                        'max_index' => count($validMoves) - 1,
+                        'raw_content' => substr($content, 0, 200),
+                    ]);
+
+                    return $this->fallbackMove($validMoves, $game);
                 }
             }
 
-            Log::warning('LLM response invalid or failed, falling back to random valid move', [
+            Log::warning('LLM response invalid or failed, falling back to non-repetitive valid move', [
                 'response' => $response->json(),
             ]);
         } catch (\Exception $e) {
-            // Log error and fall back to random move for API/connection errors
-            Log::error('LLM API error, falling back to random move', [
+            Log::error('LLM API error, falling back to non-repetitive valid move', [
                 'error' => $e->getMessage(),
                 'exception_type' => get_class($e),
             ]);
         }
 
-        // Final fallback: return a random valid move when no valid move was parsed from a successful LLM response
-        return $validMoves[array_rand($validMoves)];
+        return $this->fallbackMove($validMoves, $game);
+    }
+
+    private function extractMoveIndex(?array $result, string $content): ?int
+    {
+        $moveIndex = is_array($result) ? ($result['move'] ?? null) : null;
+        if (is_numeric($moveIndex)) {
+            $moveIndex = (int) $moveIndex;
+        }
+
+        if ($moveIndex === null && preg_match('/"move"\s*:\s*(\d+)/', $content, $matches)) {
+            $moveIndex = (int) $matches[1];
+        }
+
+        return is_int($moveIndex) ? $moveIndex : null;
+    }
+
+    private function extractAlternativeIndexes(?array $result, string $content): array
+    {
+        $alternatives = is_array($result) ? ($result['alternatives'] ?? []) : [];
+
+        if (!is_array($alternatives) && $alternatives !== null) {
+            $alternatives = [$alternatives];
+        }
+
+        if (empty($alternatives) && preg_match('/"alternatives"\s*:\s*\[([^\]]*)\]/', $content, $matches)) {
+            preg_match_all('/\d+/', $matches[1], $numbers);
+            $alternatives = array_map('intval', $numbers[0]);
+        }
+
+        $alternatives = array_map(
+            fn ($alternative) => is_numeric($alternative) ? (int) $alternative : $alternative,
+            $alternatives
+        );
+
+        return array_values(array_unique(array_filter($alternatives, 'is_int')));
+    }
+
+    private function selectMoveIndex(?int $moveIndex, array $alternativeIndexes, array $validMoves, Game $game): ?int
+    {
+        $candidateIndexes = array_values(array_unique(array_filter(
+            array_merge([$moveIndex], $alternativeIndexes),
+            fn ($index) => is_int($index) && isset($validMoves[$index])
+        )));
+
+        foreach ($candidateIndexes as $index) {
+            if (!$this->isRepetitiveMove($validMoves[$index], $game)) {
+                return $index;
+            }
+        }
+
+        return $candidateIndexes[0] ?? null;
+    }
+
+    private function fallbackMove(array $validMoves, Game $game): array
+    {
+        $nonRepetitiveMoves = array_values(array_filter(
+            $validMoves,
+            fn ($move) => !$this->isRepetitiveMove($move, $game)
+        ));
+
+        $moves = empty($nonRepetitiveMoves) ? $validMoves : $nonRepetitiveMoves;
+
+        return $moves[array_rand($moves)];
+    }
+
+    private function isRepetitiveMove(array $move, Game $game): bool
+    {
+        if (!$game->exists) {
+            return false;
+        }
+
+        $lastBlueMove = $game->moves()
+            ->where('player_color', PlayerColor::BLUE->value)
+            ->orderByDesc('move_number')
+            ->first();
+
+        if (!$lastBlueMove) {
+            return false;
+        }
+
+        return $lastBlueMove->from_row === $move['to']['row']
+            && $lastBlueMove->from_col === $move['to']['col']
+            && $lastBlueMove->to_row === $move['from']['row']
+            && $lastBlueMove->to_col === $move['from']['col'];
     }
 
     private function createRequest()
@@ -156,9 +235,9 @@ class LLMService
         ];
 
         if ($this->provider === 'azure') {
-            $payload['max_completion_tokens'] = 150;
+            $payload['max_completion_tokens'] = 250;
         } else {
-            $payload['max_tokens'] = 150;
+            $payload['max_tokens'] = 250;
         }
 
         if ($this->provider !== 'azure') {
@@ -205,8 +284,11 @@ BE AGGRESSIVE:
 
 AVOID:
 - Moving the same piece back and forth (NEVER retreat repeatedly)
+- Ignoring the strategic memory: use captures, revealed pieces, and unmoved enemy candidates
 - Being passive - attack when possible!
 - Attacking unknowns with Marshal(10) - might be a Spy trap
+
+Return your best move plus two backup move numbers in case your first choice repeats a cycle.
 PROMPT;
     }
 
@@ -217,15 +299,19 @@ PROMPT;
     {
         $board = $game->board_state;
         $boardStr = $this->formatBoardForLLM($board);
-        $movesStr = $this->formatMovesForLLM($validMoves, $board);
+        $memoryStr = $this->buildStrategicMemory($game, $board);
         $historyStr = $this->getRecentMoveHistory($game);
+        $movesStr = $this->formatMovesForLLM($validMoves, $board, $game);
 
         $prompt = "Board:{$boardStr}\n";
+        if ($memoryStr) {
+            $prompt .= "Strategic memory:{$memoryStr}\n";
+        }
         if ($historyStr) {
             $prompt .= "Recent moves:{$historyStr}\n";
         }
         $prompt .= "Valid moves (best first):\n{$movesStr}\n";
-        $prompt .= "Pick the BEST move# (0-" . (count($validMoves) - 1) . "):";
+        $prompt .= "Pick the BEST move# (0-" . (count($validMoves) - 1) . ") and two alternatives:";
 
         return $prompt;
     }
@@ -235,7 +321,11 @@ PROMPT;
      */
     private function getRecentMoveHistory(Game $game): string
     {
-        $moves = $game->moves()->latest()->take(4)->get()->reverse();
+        if (!$game->exists) {
+            return '';
+        }
+
+        $moves = $game->moves()->orderByDesc('move_number')->take(10)->get()->reverse();
         if ($moves->isEmpty()) {
             return '';
         }
@@ -258,6 +348,173 @@ PROMPT;
             $history[] = $moveStr;
         }
         return implode(', ', $history);
+    }
+
+    private function buildStrategicMemory(Game $game, array $board): string
+    {
+        $facts = array_filter([
+            $this->getCaptureInventory($game),
+            $this->getRevealedEnemyPieces($board),
+            $this->getUnmovedEnemyCandidates($game, $board),
+            $this->getRepetitionWarning($game),
+            $this->getObjectiveState($board),
+        ]);
+
+        return implode('; ', $facts);
+    }
+
+    private function getCaptureInventory(Game $game): string
+    {
+        $captured = [
+            PlayerColor::BLUE->value => [],
+            PlayerColor::RED->value => [],
+        ];
+
+        $moves = $game->exists
+            ? $game->moves()->whereNotNull('captured_rank')->orderBy('move_number')->get()
+            : collect();
+
+        foreach ($moves as $move) {
+            if ($move->result === 'draw') {
+                $attackerRank = $move->piece_rank->getName();
+                $defenderRank = $move->captured_rank->getName();
+                $defenderColor = $this->opponentColor($move->player_color)->value;
+
+                $captured[$move->player_color->value][$attackerRank] = ($captured[$move->player_color->value][$attackerRank] ?? 0) + 1;
+                $captured[$defenderColor][$defenderRank] = ($captured[$defenderColor][$defenderRank] ?? 0) + 1;
+                continue;
+            }
+
+            $rankName = $move->result === 'lose'
+                ? $move->piece_rank->getName()
+                : $move->captured_rank->getName();
+            $capturedColor = $move->result === 'lose'
+                ? $move->player_color->value
+                : $this->opponentColor($move->player_color)->value;
+            $captured[$capturedColor][$rankName] = ($captured[$capturedColor][$rankName] ?? 0) + 1;
+        }
+
+        return 'captures B-lost:' . $this->formatRankCounts($captured[PlayerColor::BLUE->value])
+            . ' R-lost:' . $this->formatRankCounts($captured[PlayerColor::RED->value]);
+    }
+
+    private function getRevealedEnemyPieces(array $board): string
+    {
+        $revealed = [];
+
+        for ($row = 0; $row < 10; $row++) {
+            for ($col = 0; $col < 10; $col++) {
+                $piece = $board[$row][$col] ?? null;
+                if (($piece['color'] ?? null) === PlayerColor::RED->value && ($piece['revealed'] ?? false)) {
+                    $revealed[] = PieceRank::from($piece['rank'])->getName() . "@{$row},{$col}";
+                }
+            }
+        }
+
+        return empty($revealed) ? 'revealed red:none' : 'revealed red:' . implode(',', array_slice($revealed, 0, 12));
+    }
+
+    private function getUnmovedEnemyCandidates(Game $game, array $board): string
+    {
+        $movedFrom = $game->exists
+            ? $game->moves()
+                ->where('player_color', PlayerColor::RED->value)
+                ->get(['from_row', 'from_col'])
+                ->map(fn ($move) => $move->from_row . ',' . $move->from_col)
+                ->all()
+            : [];
+        $movedFrom = array_flip($movedFrom);
+        $candidates = [];
+
+        for ($row = 6; $row < 10; $row++) {
+            for ($col = 0; $col < 10; $col++) {
+                $piece = $board[$row][$col] ?? null;
+                if (($piece['color'] ?? null) !== PlayerColor::RED->value || ($piece['revealed'] ?? false)) {
+                    continue;
+                }
+
+                if (!isset($movedFrom["{$row},{$col}"])) {
+                    $label = $row >= 8 ? 'flag/bomb?' : 'static?';
+                    $candidates[] = "{$row},{$col}:{$label}";
+                }
+            }
+        }
+
+        return empty($candidates) ? 'unmoved red:none' : 'unmoved red:' . implode(',', array_slice($candidates, 0, 16));
+    }
+
+    private function getRepetitionWarning(Game $game): string
+    {
+        $moves = $game->moves()
+            ->where('player_color', PlayerColor::BLUE->value)
+            ->orderByDesc('move_number')
+            ->take(4)
+            ->get()
+            ->reverse()
+            ->values();
+
+        if ($moves->count() < 2) {
+            return '';
+        }
+
+        $last = $moves[$moves->count() - 1];
+        $previous = $moves[$moves->count() - 2];
+
+        if ($last->from_row === $previous->to_row
+            && $last->from_col === $previous->to_col
+            && $last->to_row === $previous->from_row
+            && $last->to_col === $previous->from_col) {
+            return "avoid repeating {$last->to_row},{$last->to_col}<->{$last->from_row},{$last->from_col}";
+        }
+
+        return '';
+    }
+
+    private function getObjectiveState(array $board): string
+    {
+        $miners = [];
+        $frontRow = null;
+        $unknownBackRow = [];
+
+        for ($row = 0; $row < 10; $row++) {
+            for ($col = 0; $col < 10; $col++) {
+                $piece = $board[$row][$col] ?? null;
+                if (($piece['color'] ?? null) === PlayerColor::BLUE->value) {
+                    $frontRow = max($frontRow ?? $row, $row);
+                    if (($piece['rank'] ?? null) === PieceRank::MINER->value) {
+                        $miners[] = "{$row},{$col}";
+                    }
+                }
+
+                if ($row >= 8 && ($piece['color'] ?? null) === PlayerColor::RED->value && !($piece['revealed'] ?? false)) {
+                    $unknownBackRow[] = "{$row},{$col}";
+                }
+            }
+        }
+
+        return 'objective front-row:' . ($frontRow ?? 'none')
+            . ' miners:' . (empty($miners) ? 'none' : implode(',', array_slice($miners, 0, 6)))
+            . ' back-row-targets:' . (empty($unknownBackRow) ? 'none' : implode(',', array_slice($unknownBackRow, 0, 8)));
+    }
+
+    private function formatRankCounts(array $counts): string
+    {
+        if (empty($counts)) {
+            return 'none';
+        }
+
+        ksort($counts);
+
+        return implode(',', array_map(
+            fn ($rank, $count) => "{$rank}x{$count}",
+            array_keys($counts),
+            $counts
+        ));
+    }
+
+    private function opponentColor(PlayerColor $color): PlayerColor
+    {
+        return $color === PlayerColor::BLUE ? PlayerColor::RED : PlayerColor::BLUE;
     }
 
     /**
@@ -298,14 +555,18 @@ PROMPT;
     /**
      * Format valid moves for LLM as numbered list, scored and sorted by quality
      */
-    private function formatMovesForLLM(array $validMoves, array $board): string
+    private function formatMovesForLLM(array $validMoves, array $board, Game $game): string
     {
         $scoredMoves = [];
 
         foreach ($validMoves as $index => $move) {
             $from = $move['from'];
             $to = $move['to'];
-            $piece = $board[$from['row']][$from['col']];
+            $piece = $board[$from['row']][$from['col']] ?? null;
+            if (!isset($piece['rank'])) {
+                continue;
+            }
+
             $rankName = PieceRank::from($piece['rank'])->getName();
             $myRank = $piece['rank'];
 
@@ -387,6 +648,11 @@ PROMPT;
                 }
             }
 
+            if ($this->isRepetitiveMove($move, $game)) {
+                $score -= 75;
+                $tags[] = 'REPETITION-RISK';
+            }
+
             $tagStr = empty($tags) ? '' : ' [' . implode(',', $tags) . ']';
             $scoredMoves[] = [
                 'score' => $score,
@@ -433,12 +699,21 @@ PROMPT;
                     'type' => 'integer',
                     'description' => "Move number 0 to {$maxMove}",
                 ],
+                'alternatives' => [
+                    'type' => 'array',
+                    'description' => 'Two backup move numbers, best first',
+                    'minItems' => 2,
+                    'maxItems' => 2,
+                    'items' => [
+                        'type' => 'integer',
+                    ],
+                ],
                 'why' => [
                     'type' => 'string',
                     'description' => '1-5 words only',
                 ],
             ],
-            'required' => ['move', 'why'],
+            'required' => ['move', 'alternatives', 'why'],
             'additionalProperties' => false,
         ];
     }
