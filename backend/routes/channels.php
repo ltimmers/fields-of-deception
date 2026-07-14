@@ -13,8 +13,7 @@ Broadcast::channel('game.{gameId}', function ($user, $gameId) {
         return false;
     }
 
-    // Allow if user is a player in the game
+    // Allow only players in the game. AI games are owned by the red player.
     return $game->player_red_id === $user->id ||
-           $game->player_blue_id === $user->id ||
-           $game->is_vs_ai;
+           $game->player_blue_id === $user->id;
 });

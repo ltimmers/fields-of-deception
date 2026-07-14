@@ -61,10 +61,13 @@ class GameService
         // Red places on rows 6-9, Blue places on rows 0-3
         $validRowRange = $color === PlayerColor::RED ? [6, 9] : [0, 3];
 
+        $occupied = [];
+
         foreach ($pieces as $piece) {
             $row = $piece['row'];
             $col = $piece['col'];
             $rank = $piece['rank'];
+            $positionKey = $row . ':' . $col;
 
             // Validate row range
             if ($row < $validRowRange[0] || $row > $validRowRange[1]) {
@@ -81,6 +84,15 @@ class GameService
                 return false;
             }
 
+            if (isset($occupied[$positionKey])) {
+                return false;
+            }
+
+            if (!array_key_exists($rank, $counts)) {
+                return false;
+            }
+
+            $occupied[$positionKey] = true;
             $counts[$rank]++;
         }
 
@@ -213,6 +225,14 @@ class GameService
      */
     public function executeMove(Game $game, int $fromRow, int $fromCol, int $toRow, int $toCol, PlayerColor $playerColor): array
     {
+        if ($game->status !== GameStatus::IN_PROGRESS || $game->current_turn !== $playerColor) {
+            throw new \InvalidArgumentException('Move cannot be executed in the current game state.');
+        }
+
+        if (!$this->validateMove($game, $fromRow, $fromCol, $toRow, $toCol, $playerColor)) {
+            throw new \InvalidArgumentException('Invalid move.');
+        }
+
         $board = $game->board_state;
         $attackerPiece = $board[$fromRow][$fromCol];
         $defenderPiece = $board[$toRow][$toCol] ?? null;
@@ -269,7 +289,7 @@ class GameService
         $game->board_state = $board;
 
         // Record the move
-        $moveNumber = $game->moves()->count() + 1;
+        $moveNumber = ((int) $game->moves()->max('move_number')) + 1;
         Move::create([
             'game_id' => $game->id,
             'player_color' => $playerColor,
